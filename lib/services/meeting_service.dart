@@ -43,6 +43,9 @@ class GcbMeetingService extends ChangeNotifier {
   Duration _elapsedTime = const Duration();
   Timer? _meetingTimer;
 
+  // Stream subscriptions for cleanup
+  final List<StreamSubscription> _subscriptions = [];
+
   // Getters
   String? get meetingId => _meetingId;
   String? get userId => _userId;
@@ -240,17 +243,9 @@ class GcbMeetingService extends ChangeNotifier {
         }
       }
 
-
       // Check if meeting is active
       if (meetingData['status'] != 'active') {
         throw Exception('Meeting has ended');
-      }
-
-      // Check password if required
-      if (meetingData['password'] != null && meetingData['password'].isNotEmpty) {
-        if (password != meetingData['password']) {
-          throw Exception('Incorrect password');
-        }
       }
 
       _meetingId = meetingId;
@@ -304,10 +299,57 @@ class GcbMeetingService extends ChangeNotifier {
     }
   }
 
-  // Leave meeting
-  Future<void> leaveMeeting() async {
+  // END CALL METHODS - NEW ADDITIONS
+
+  // End call for host (ends meeting for everyone)
+  Future<void> endMeetingForAll() async {
+    if (!_isHost || _meetingId == null || _userId == null) return;
+
     try {
-      if (_meetingId == null || _userId == null) return;
+      print('Host ending meeting for all participants');
+
+      // Set meeting status to ended
+      await _firestore.collection('meetings').doc(_meetingId).update({
+        'status': 'ended_by_host',
+        'endedAt': FieldValue.serverTimestamp(),
+        'endedBy': _userId,
+      });
+
+      // Remove from active meetings
+      await _firestore.collection('active_meetings').doc(_meetingId).delete();
+
+      // Update all participants to inactive
+      final participantsSnapshot = await _firestore
+          .collection('meetings')
+          .doc(_meetingId)
+          .collection('participants')
+          .get();
+
+      final batch = _firestore.batch();
+      for (var doc in participantsSnapshot.docs) {
+        batch.update(doc.reference, {
+          'isActive': false,
+          'leftAt': FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+
+      // Clean up local resources
+      await _cleanupMeetingResources();
+
+      print('Meeting ended by host successfully');
+    } catch (e) {
+      print('Error ending meeting: $e');
+      throw Exception('Failed to end meeting: $e');
+    }
+  }
+
+  // Leave meeting for participants
+  Future<void> leaveMeetingAsParticipant() async {
+    if (_meetingId == null || _userId == null) return;
+
+    try {
+      print('Participant leaving meeting');
 
       // Update participant status
       await _firestore
@@ -339,16 +381,32 @@ class GcbMeetingService extends ChangeNotifier {
         'participantCount': FieldValue.increment(-1),
       });
 
-      // If host is leaving, end the meeting
-      if (_isHost) {
-        await _firestore.collection('meetings').doc(_meetingId).update({
-          'status': 'ended',
-          'endedAt': FieldValue.serverTimestamp(),
-        });
+      // Clean up local resources
+      await _cleanupMeetingResources();
 
-        // Remove from active_meetings
-        await _firestore.collection('active_meetings').doc(_meetingId).delete();
+      print('Left meeting as participant successfully');
+    } catch (e) {
+      print('Error leaving meeting: $e');
+      throw Exception('Failed to leave meeting: $e');
+    }
+  }
+
+  // Cleanup all meeting resources
+  Future<void> _cleanupMeetingResources() async {
+    try {
+      print('Cleaning up meeting resources...');
+
+      // Stop speech recognition if active
+      if (_isListening) {
+        await _speechToText.stop();
+        _isListening = false;
       }
+
+      // Cancel all stream subscriptions
+      for (var subscription in _subscriptions) {
+        subscription.cancel();
+      }
+      _subscriptions.clear();
 
       // Close all peer connections
       for (var pc in _peerConnections.values) {
@@ -356,12 +414,13 @@ class GcbMeetingService extends ChangeNotifier {
       }
       _peerConnections.clear();
 
-      // Dispose streams and renderers
+      // Stop and dispose all remote streams
       for (var stream in _remoteStreams.values) {
         stream.getTracks().forEach((track) => track.stop());
       }
       _remoteStreams.clear();
 
+      // Dispose all remote renderers
       for (var renderer in _remoteRenderers.values) {
         await renderer.dispose();
       }
@@ -373,21 +432,82 @@ class GcbMeetingService extends ChangeNotifier {
         _localStream = null;
       }
 
-      // Reset meeting state
+      // Dispose local renderer
+      if (_localRenderer != null) {
+        await _localRenderer!.dispose();
+        _localRenderer = null;
+      }
+
+      // Stop timer
+      _meetingTimer?.cancel();
+      _meetingTimer = null;
+
+      // Reset all state
       _meetingId = null;
       _isHost = false;
       _isMeetingActive = false;
       _participants.clear();
       _subtitles.clear();
+      _messages.clear();
       _participantLanguages.clear();
-
-      // Stop timer
-      _meetingTimer?.cancel();
       _elapsedTime = const Duration();
 
       notifyListeners();
+      print('Meeting resources cleaned up successfully');
     } catch (e) {
-      print('Error leaving meeting: $e');
+      print('Error cleaning up meeting resources: $e');
+    }
+  }
+
+  // Force end meeting (called when host ends or meeting disconnected)
+  Future<void> _forceEndMeeting() async {
+    print('Force ending meeting...');
+    await _cleanupMeetingResources();
+    print('Meeting force ended');
+  }
+
+  // Listen for meeting status changes
+  void _listenForMeetingStatus() {
+    if (_meetingId == null) return;
+
+    print('Starting to listen for meeting status changes');
+
+    final subscription = _firestore
+        .collection('meetings')
+        .doc(_meetingId)
+        .snapshots()
+        .listen((snapshot) async {
+      if (snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        final status = data['status'];
+
+        print('Meeting status changed to: $status');
+
+        if (status == 'ended_by_host' || status == 'ended') {
+          print('Meeting has been ended, cleaning up...');
+          // Meeting has been ended by host
+          await _forceEndMeeting();
+        }
+      }
+    }, onError: (error) {
+      print('Error listening for meeting status: $error');
+    });
+
+    _subscriptions.add(subscription);
+  }
+
+  // Legacy leave meeting method - updated to use new logic
+  Future<void> leaveMeeting() async {
+    try {
+      if (_isHost) {
+        await endMeetingForAll();
+      } else {
+        await leaveMeetingAsParticipant();
+      }
+    } catch (e) {
+      print('Error in leaveMeeting: $e');
+      // Fallback cleanup
+      await _cleanupMeetingResources();
     }
   }
 
@@ -425,6 +545,9 @@ class GcbMeetingService extends ChangeNotifier {
       // Start the meeting timer
       _startMeetingTimer();
 
+      // Listen for meeting status changes - IMPORTANT: Add this
+      _listenForMeetingStatus();
+
       // Listen for participant changes
       _listenForParticipants();
 
@@ -450,7 +573,7 @@ class GcbMeetingService extends ChangeNotifier {
   void _listenForParticipants() {
     if (_meetingId == null) return;
 
-    _firestore
+    final subscription = _firestore
         .collection('meetings')
         .doc(_meetingId)
         .collection('participants')
@@ -526,6 +649,8 @@ class GcbMeetingService extends ChangeNotifier {
     }, onError: (error) {
       print('Error listening for participants: $error');
     });
+
+    _subscriptions.add(subscription);
   }
 
   // Create WebRTC peer connection for a participant
@@ -607,7 +732,7 @@ class GcbMeetingService extends ChangeNotifier {
       });
 
       // Listen for answer
-      _firestore
+      final answerSubscription = _firestore
           .collection('meetings')
           .doc(_meetingId)
           .collection('connections')
@@ -636,8 +761,10 @@ class GcbMeetingService extends ChangeNotifier {
         print('Error listening for answer: $error');
       });
 
+      _subscriptions.add(answerSubscription);
+
       // Listen for ICE candidates
-      _firestore
+      final candidateSubscription = _firestore
           .collection('meetings')
           .doc(_meetingId)
           .collection('connections')
@@ -667,6 +794,8 @@ class GcbMeetingService extends ChangeNotifier {
       }, onError: (error) {
         print('Error listening for ICE candidates: $error');
       });
+
+      _subscriptions.add(candidateSubscription);
     } catch (e) {
       print('Error creating peer connection: $e');
     }
@@ -676,7 +805,7 @@ class GcbMeetingService extends ChangeNotifier {
   void _listenForConnectionRequests() {
     if (_meetingId == null || _userId == null) return;
 
-    _firestore
+    final subscription = _firestore
         .collection('meetings')
         .doc(_meetingId)
         .collection('connections')
@@ -772,7 +901,7 @@ class GcbMeetingService extends ChangeNotifier {
             }
 
             // Listen for ICE candidates
-            _firestore
+            final candidateSubscription = _firestore
                 .collection('meetings')
                 .doc(_meetingId)
                 .collection('connections')
@@ -802,19 +931,23 @@ class GcbMeetingService extends ChangeNotifier {
             }, onError: (error) {
               print('Error listening for ICE candidates: $error');
             });
+
+            _subscriptions.add(candidateSubscription);
           }
         }
       }
     }, onError: (error) {
       print('Error listening for connection requests: $error');
     });
+
+    _subscriptions.add(subscription);
   }
 
   // Listen for messages
   void _listenForMessages() {
     if (_meetingId == null) return;
 
-    _firestore
+    final subscription = _firestore
         .collection('meetings')
         .doc(_meetingId)
         .collection('messages')
@@ -843,13 +976,15 @@ class GcbMeetingService extends ChangeNotifier {
     }, onError: (error) {
       print('Error listening for messages: $error');
     });
+
+    _subscriptions.add(subscription);
   }
 
   // Listen for subtitles/transcriptions
   void _listenForSubtitles() {
     if (_meetingId == null) return;
 
-    _firestore
+    final subscription = _firestore
         .collection('meetings')
         .doc(_meetingId)
         .collection('subtitles')
@@ -879,6 +1014,8 @@ class GcbMeetingService extends ChangeNotifier {
     }, onError: (error) {
       print('Error listening for subtitles: $error');
     });
+
+    _subscriptions.add(subscription);
   }
 
   // Disable WebRTC audio during speech recognition
@@ -1270,7 +1407,6 @@ class GcbMeetingService extends ChangeNotifier {
   }
 
   // Restore camera after screen sharing ends
-  // Restore camera after screen sharing ends
   Future<void> _restoreCamera(MediaStream? oldStream) async {
     try {
       if (oldStream != null && oldStream.getVideoTracks().isNotEmpty) {
@@ -1407,6 +1543,14 @@ class GcbMeetingService extends ChangeNotifier {
 
   @override
   void dispose() {
+    print('Disposing MeetingService...');
+
+    // Cancel all subscriptions
+    for (var subscription in _subscriptions) {
+      subscription.cancel();
+    }
+    _subscriptions.clear();
+
     // Cleanup resources
     _meetingTimer?.cancel();
 

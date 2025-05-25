@@ -28,9 +28,29 @@ class MeetingScreen extends StatelessWidget {
     });
 
     return ChangeNotifierProvider(
-      create: (context) => MeetingController(meetingService),
+      create: (context) {
+        final controller = MeetingController(meetingService);
+
+        // Set navigation callback
+        controller.setOnMeetingEndedCallback(() {
+          // Navigate back to home screen
+          _navigateToHome(context);
+        });
+
+        return controller;
+      },
       child: _MeetingContent(meetingCode: code),
     );
+  }
+
+  // Navigate to home screen
+  void _navigateToHome(BuildContext context) {
+    // Clear all routes and go to home
+    if (context.mounted) {
+      context.router.popUntilRoot();
+      // Or use your specific home route if you have one:
+      // context.router.pushAndClearStack(const HomeRoute());
+    }
   }
 
   // Helper method to join meeting
@@ -46,23 +66,25 @@ class MeetingScreen extends StatelessWidget {
       await service.joinMeeting(meetingId: code, password: password);
     } catch (e) {
       // Show error dialog and navigate back
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Text('Error Joining Meeting'),
-          content: Text('Failed to join meeting: $e'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).pop();
-              },
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('Error Joining Meeting'),
+            content: Text('Failed to join meeting: $e'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).pop();
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
     }
   }
 }
@@ -81,7 +103,7 @@ class _MeetingContent extends StatelessWidget {
       backgroundColor: Colors.black,
       body: WillPopScope(
         onWillPop: () async {
-          _showLeaveMeetingDialog(context);
+          _showEndCallDialog(context, controller);
           return false;
         },
         child: SafeArea(
@@ -141,7 +163,6 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  // Add missing method implementations
   Widget _buildInfoBar(BuildContext context, MeetingController controller, String meetingCode) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -160,7 +181,7 @@ class _MeetingContent extends StatelessWidget {
                 const Icon(Icons.timer, color: Colors.white, size: 16),
                 const SizedBox(width: 4),
                 Text(
-                  '${controller.elapsedTime.inMinutes.toString().padLeft(2, '0')}:${(controller.elapsedTime.inSeconds % 60).toString().padLeft(2, '0')}',
+                  controller.formattedElapsedTime,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
@@ -201,7 +222,7 @@ class _MeetingContent extends StatelessWidget {
                 const Icon(Icons.people, color: Colors.white, size: 16),
                 const SizedBox(width: 4),
                 Text(
-                  '${controller.participants.length}',
+                  '${controller.participantCount}',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
@@ -326,6 +347,7 @@ class _MeetingContent extends StatelessWidget {
       ),
     );
   }
+
   Widget _buildSubtitleArea(BuildContext context, MeetingController controller) {
     // Get first subtitle if available
     final subtitle = controller.subtitles.isNotEmpty
@@ -335,8 +357,10 @@ class _MeetingContent extends StatelessWidget {
     if (subtitle == null) return const SizedBox.shrink();
 
     // Find speaking participant
-    final speakingParticipant = controller.participants
-        .firstWhere((p) => p.isSpeaking, orElse: () => controller.participants.first);
+    final speakingParticipant = controller.getCurrentSpeakingParticipant() ??
+        (controller.participants.isNotEmpty ? controller.participants.first : null);
+
+    if (speakingParticipant == null) return const SizedBox.shrink();
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
@@ -438,6 +462,16 @@ class _MeetingContent extends StatelessWidget {
             isHighlighted: controller.isHandRaised,
             onPressed: controller.toggleHandRaised,
           ),
+          // Add microphone button for speech recognition
+          _buildControlButton(
+            icon: controller.isListening ? Icons.mic : Icons.mic_none,
+            label: controller.isListening ? 'Stop Speaking' : 'Start Speaking',
+            isActive: true,
+            isHighlighted: controller.isListening,
+            onPressed: controller.toggleSpeechRecognition,
+          ),
+          // END CALL BUTTON
+          _buildEndCallButton(context, controller),
         ],
       ),
     );
@@ -487,8 +521,38 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  void _showLeaveMeetingDialog(BuildContext context) {
-    final controller = Provider.of<MeetingController>(context, listen: false);
+  Widget _buildEndCallButton(BuildContext context, MeetingController controller) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          decoration: const BoxDecoration(
+            color: Colors.red,
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            icon: const Icon(
+              Icons.call_end,
+              color: Colors.white,
+              size: 24,
+            ),
+            onPressed: () => _showEndCallDialog(context, controller),
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'End Call',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showEndCallDialog(BuildContext context, MeetingController controller) {
+    final isHost = controller.isHost;
 
     showDialog(
       context: context,
@@ -496,13 +560,15 @@ class _MeetingContent extends StatelessWidget {
       builder: (context) {
         return AlertDialog(
           backgroundColor: GcbAppTheme.surface,
-          title: const Text(
-            'Leave Meeting',
-            style: TextStyle(color: Colors.white),
+          title: Text(
+            isHost ? 'End Meeting' : 'Leave Meeting',
+            style: const TextStyle(color: Colors.white),
           ),
-          content: const Text(
-            'Are you sure you want to leave this meeting?',
-            style: TextStyle(color: Colors.white),
+          content: Text(
+            isHost
+                ? 'Are you sure you want to end this meeting for everyone?'
+                : 'Are you sure you want to leave this meeting?',
+            style: const TextStyle(color: Colors.white),
           ),
           actions: [
             TextButton(
@@ -513,13 +579,78 @@ class _MeetingContent extends StatelessWidget {
               ),
             ),
             TextButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+
+                // Show loading dialog
+                _showLoadingDialog(context);
+
+                try {
+                  await controller.endOrLeaveCall();
+
+                  // Hide loading dialog if still mounted
+                  if (context.mounted) {
+                    Navigator.of(context).pop();
+                  }
+                } catch (e) {
+                  // Hide loading dialog
+                  if (context.mounted) {
+                    Navigator.of(context).pop();
+                  }
+
+                  // Show error dialog
+                  if (context.mounted) {
+                    _showErrorDialog(context, 'Failed to ${isHost ? 'end' : 'leave'} meeting: $e');
+                  }
+                }
+              },
+              child: Text(
+                isHost ? 'End Meeting' : 'Leave Meeting',
+                style: const TextStyle(color: Colors.red),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showLoadingDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return const Center(
+          child: CircularProgressIndicator(),
+        );
+      },
+    );
+  }
+
+  void _showErrorDialog(BuildContext context, String message) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: GcbAppTheme.surface,
+          title: const Text(
+            'Error',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Text(
+            message,
+            style: const TextStyle(color: Colors.white),
+          ),
+          actions: [
+            TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                context.router.pop();
+                // Force navigate to home
+                context.router.popUntilRoot();
               },
               child: const Text(
-                'Leave Meeting',
-                style: TextStyle(color: Colors.red),
+                'OK',
+                style: TextStyle(color: Colors.blue),
               ),
             ),
           ],

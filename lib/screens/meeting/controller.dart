@@ -13,6 +13,9 @@ class MeetingController extends ChangeNotifier {
   bool _isLanguageMenuVisible = false;
   bool _areSubtitlesVisible = true;
 
+  // END CALL - Navigation callback
+  VoidCallback? onMeetingEnded;
+
   // Getters
   String get meetingCode => _meetingService.meetingId ?? 'Unknown';
   Duration get elapsedTime => _meetingService.elapsedTime;
@@ -28,10 +31,34 @@ class MeetingController extends ChangeNotifier {
   List<ParticipantModel> get participants => _meetingService.participants;
   List<SubtitleModel> get subtitles => _meetingService.subtitles;
 
+  // END CALL - Additional getters
+  bool get isHost => _meetingService.isHost;
+  bool get isMeetingActive => _meetingService.isMeetingActive;
+  bool get isListening => _meetingService.isListening;
+  int get participantCount => _meetingService.participants.length;
+
+  // Format elapsed time for display
+  String get formattedElapsedTime {
+    final hours = elapsedTime.inHours;
+    final minutes = elapsedTime.inMinutes % 60;
+    final seconds = elapsedTime.inSeconds % 60;
+
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    } else {
+      return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+  }
+
   // Constructor
   MeetingController(this._meetingService) {
     // Listen for meeting service changes
     _meetingService.addListener(_syncStateFromService);
+  }
+
+  // END CALL - Set navigation callback
+  void setOnMeetingEndedCallback(VoidCallback callback) {
+    onMeetingEnded = callback;
   }
 
   // Get local participant
@@ -58,7 +85,68 @@ class MeetingController extends ChangeNotifier {
 
   // Sync controller from service changes
   void _syncStateFromService() {
+    // END CALL - Check if meeting has ended
+    if (!_meetingService.isMeetingActive && _meetingService.meetingId == null) {
+      print('Meeting has ended, triggering navigation callback');
+      // Meeting has ended, trigger navigation callback
+      onMeetingEnded?.call();
+    }
     notifyListeners();
+  }
+
+  // END CALL METHODS
+
+  // End call method (for host - ends meeting for everyone)
+  Future<void> endCall() async {
+    try {
+      print('Ending call as host...');
+      await _meetingService.endMeetingForAll();
+
+      // Trigger navigation callback
+      onMeetingEnded?.call();
+    } catch (e) {
+      print('Error ending call: $e');
+      // Still trigger navigation even if there's an error
+      onMeetingEnded?.call();
+    }
+  }
+
+  // Leave call method (for participants)
+  Future<void> leaveCall() async {
+    try {
+      print('Leaving call as participant...');
+      await _meetingService.leaveMeetingAsParticipant();
+
+      // Trigger navigation callback
+      onMeetingEnded?.call();
+    } catch (e) {
+      print('Error leaving call: $e');
+      // Still trigger navigation even if there's an error
+      onMeetingEnded?.call();
+    }
+  }
+
+  // Combined end/leave call method
+  Future<void> endOrLeaveCall() async {
+    if (isHost) {
+      await endCall();
+    } else {
+      await leaveCall();
+    }
+  }
+
+  // Legacy method - updated to use new logic
+  void leaveMeeting(BuildContext context) async {
+    try {
+      await endOrLeaveCall();
+      // Navigation will be handled by callback
+    } catch (e) {
+      print('Error in leaveMeeting: $e');
+      // Fallback navigation
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
+    }
   }
 
   // Methods to toggle controls
@@ -123,6 +211,14 @@ class MeetingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // END CALL - Close all panels
+  void closePanels() {
+    _isChatVisible = false;
+    _isParticipantsListVisible = false;
+    _isLanguageMenuVisible = false;
+    notifyListeners();
+  }
+
   void setSelectedLanguage(String language) {
     _meetingService.setLanguagePreferences(
         speaking: _meetingService.speakingLanguage,
@@ -132,14 +228,26 @@ class MeetingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void leaveMeeting(BuildContext context) async {
-    await _meetingService.leaveMeeting();
-    Navigator.of(context).pop();
-  }
-
   // Speech recognition
   void toggleSpeechRecognition() async {
     await _meetingService.toggleSpeechRecognition();
+  }
+
+  // START/STOP speech recognition separately
+  Future<void> startSpeechRecognition() async {
+    try {
+      await _meetingService.startSpeechRecognition();
+    } catch (e) {
+      print('Error starting speech recognition: $e');
+    }
+  }
+
+  Future<void> stopSpeechRecognition() async {
+    try {
+      await _meetingService.stopSpeechRecognition();
+    } catch (e) {
+      print('Error stopping speech recognition: $e');
+    }
   }
 
   // Send message
@@ -152,8 +260,41 @@ class MeetingController extends ChangeNotifier {
     return _meetingService.getRendererForParticipant(participantId);
   }
 
+  // END CALL - Utility methods
+
+  // Get current speaking participant
+  ParticipantModel? getCurrentSpeakingParticipant() {
+    try {
+      return participants.firstWhere((p) => p.isSpeaking);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Get local participant (public method)
+  ParticipantModel? getLocalParticipant() {
+    try {
+      return participants.firstWhere((p) => p.id == _meetingService.userId);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Check if user is the only participant
+  bool get isOnlyParticipant => participants.length <= 1;
+
+  // Better camera state detection
+  bool get isCameraOnDetailed {
+    if (_meetingService.localRenderer?.srcObject == null) return false;
+
+    // You can implement more detailed camera detection here
+    // For now, return true if we have local renderer
+    return _meetingService.localRenderer?.srcObject != null;
+  }
+
   @override
   void dispose() {
+    print('Disposing MeetingController...');
     _meetingService.removeListener(_syncStateFromService);
     super.dispose();
   }
