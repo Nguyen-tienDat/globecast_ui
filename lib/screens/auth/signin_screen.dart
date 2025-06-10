@@ -1,12 +1,10 @@
 // lib/screens/auth/signin_screen.dart
-import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
-import 'package:globecast_ui/router/app_router.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
+import '../../router/app_router.dart';
 import '../../services/auth_service.dart';
 
-@RoutePage()
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
 
@@ -44,8 +42,7 @@ class _SignInScreenState extends State<SignInScreen> {
       );
 
       if (mounted) {
-        // Navigate to home screen
-        context.router.replaceAll([const HomeRoute()]);
+        Navigator.pushReplacementNamed(context, Routes.home);
       }
     } catch (e) {
       if (mounted) {
@@ -74,7 +71,7 @@ class _SignInScreenState extends State<SignInScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => context.router.pop(),
+          onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'Sign In',
@@ -210,7 +207,6 @@ class _SignInScreenState extends State<SignInScreen> {
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: () {
-                      // TODO: Implement forgot password
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('Forgot password coming soon!')),
                       );
@@ -274,7 +270,7 @@ class _SignInScreenState extends State<SignInScreen> {
                     ),
                     TextButton(
                       onPressed: () {
-                        context.router.push(const SignUpRoute());
+                        Navigator.pushNamed(context, Routes.signUp);
                       },
                       child: const Text(
                         'Sign Up',
@@ -294,7 +290,7 @@ class _SignInScreenState extends State<SignInScreen> {
                 Center(
                   child: TextButton(
                     onPressed: () {
-                      context.router.replaceAll([const HomeRoute()]);
+                      Navigator.pushReplacementNamed(context, Routes.home);
                     },
                     child: Text(
                       'Continue as Guest',

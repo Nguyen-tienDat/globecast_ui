@@ -1,12 +1,10 @@
-import 'package:auto_route/auto_route.dart';
+// lib/screens/join_meeting/join_meeting_screen.dart
 import 'package:flutter/material.dart';
-import 'package:globecast_ui/router/app_router.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
+import '../../router/app_router.dart';
+import '../../services/webrtc_mesh_meeting_service.dart';
 
-import '../../services/meeting_service.dart';
-
-@RoutePage()
 class JoinMeetingScreen extends StatefulWidget {
   const JoinMeetingScreen({super.key});
 
@@ -16,42 +14,50 @@ class JoinMeetingScreen extends StatefulWidget {
 
 class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
   final _meetingCodeController = TextEditingController();
-  final _passwordController = TextEditingController();
+  bool _isLoading = false;
 
   @override
   void dispose() {
     _meetingCodeController.dispose();
-    _passwordController.dispose();
     super.dispose();
   }
 
-  // Phương thức tham gia cuộc họp
   Future<void> _joinMeeting() async {
-    if (_meetingCodeController.text.isEmpty) {
+    if (_meetingCodeController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a meeting code')),
       );
       return;
     }
 
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
-      final meetingService = Provider.of<GcbMeetingService>(context, listen: false);
+      final webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
 
-      // Set user details with random ID to simulate different users
-      meetingService.setUserDetails(displayName: 'Participant');
-
-      // Set default language preferences
-      meetingService.setLanguagePreferences(
-        speaking: 'english',
-        listening: 'english',
-      );
+      // Set user details
+      webrtcService.setUserDetails(displayName: 'Participant');
 
       // Navigate to meeting screen (joining will happen there)
-      context.router.push(MeetingRoute(code: _meetingCodeController.text));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to prepare for joining: $e')),
+      Navigator.pushNamed(
+          context,
+          Routes.meeting,
+          arguments: {'code': _meetingCodeController.text.trim()}
       );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to prepare for joining: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -64,10 +70,10 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => context.router.pop(),
+          onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'Join Meeting',
+          'Join WebRTC Meeting',
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w500,
@@ -80,6 +86,47 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Info about mesh topology
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  border: Border.all(color: Colors.green, width: 1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.green),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Joining Mesh Meeting',
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'You will connect directly to other participants via WebRTC mesh network.',
+                            style: TextStyle(
+                              color: Colors.grey[300],
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
               // Meeting Code Label
               const Text(
                 'Meeting Code',
@@ -95,10 +142,11 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
               TextField(
                 controller: _meetingCodeController,
                 style: const TextStyle(color: Colors.white),
+                textCapitalization: TextCapitalization.characters,
                 decoration: InputDecoration(
-                  hintText: 'Enter meeting code',
+                  hintText: 'Enter meeting code (e.g., GCM12345678)',
                   hintStyle: TextStyle(color: Colors.grey[500]),
-                  prefixIcon: const Icon(Icons.numbers, color: Colors.grey),
+                  prefixIcon: const Icon(Icons.meeting_room, color: Colors.grey),
                   filled: true,
                   fillColor: GcbAppTheme.surface,
                   border: OutlineInputBorder(
@@ -108,56 +156,73 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                   contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
-              const SizedBox(height: 16),
 
-              // Password Label
-              const Text(
-                'Password (optional)',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
+              const SizedBox(height: 24),
+
+              // Connection info
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: GcbAppTheme.surface,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              ),
-              const SizedBox(height: 8),
-
-              // Password Input
-              TextField(
-                controller: _passwordController,
-                style: const TextStyle(color: Colors.white),
-                obscureText: true,
-                decoration: InputDecoration(
-                  hintText: 'Enter meeting password if required',
-                  hintStyle: TextStyle(color: Colors.grey[500]),
-                  prefixIcon: const Icon(Icons.lock_outline, color: Colors.grey),
-                  filled: true,
-                  fillColor: GcbAppTheme.surface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Connection Details:',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const _ConnectionItem(
+                      icon: Icons.speed,
+                      text: 'Low latency P2P connection',
+                    ),
+                    const _ConnectionItem(
+                      icon: Icons.security,
+                      text: 'End-to-end encrypted',
+                    ),
+                    const _ConnectionItem(
+                      icon: Icons.storage,
+                      text: 'No server recording',
+                    ),
+                    const _ConnectionItem(
+                      icon: Icons.devices,
+                      text: 'Works on all devices',
+                    ),
+                  ],
                 ),
               ),
 
               const Spacer(),
 
-              // Join Now Button - ĐÃ SỬA
+              // Join Now Button
               SizedBox(
                 width: double.infinity,
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: _joinMeeting,  // Đã sửa: gọi phương thức _joinMeeting
-                  style: ButtonStyle(  // Đã sửa: sử dụng ButtonStyle thay vì ElevatedButton.styleFrom
-                    backgroundColor: MaterialStateProperty.all<Color>(Colors.blue),
-                    shape: MaterialStateProperty.all<RoundedRectangleBorder>(
-                      RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                  onPressed: _isLoading ? null : _joinMeeting,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: const Text(
-                    'Join Now',
+                  child: _isLoading
+                      ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
+                      : const Text(
+                    'Join Mesh Meeting',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -170,6 +235,36 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ConnectionItem extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _ConnectionItem({
+    required this.icon,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.green, size: 16),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: TextStyle(
+              color: Colors.grey[300],
+              fontSize: 12,
+            ),
+          ),
+        ],
       ),
     );
   }

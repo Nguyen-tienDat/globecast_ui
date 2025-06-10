@@ -74,6 +74,7 @@ dependencies:
   flutter_webrtc: ^0.13.1+hotfix.1
   permission_handler: ^11.3.1
 
+
   translator: ^1.0.3+1
 
   speech_to_text: ^7.0.0

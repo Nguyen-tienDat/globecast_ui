@@ -1,41 +1,70 @@
 // lib/screens/meeting/controller.dart
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:globecast_ui/services/meeting_service.dart';
+import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
+import '../../models/meeting_models.dart';
+
+
 
 class MeetingController extends ChangeNotifier {
-  // Reference to meeting service
-  final GcbMeetingService _meetingService;
+  // Reference to SFU service
+  final WebRTCMeshMeetingService _mediaService;
 
-  // Local state for UI elements
+  // Local UI state
   bool _isChatVisible = false;
   bool _isParticipantsListVisible = false;
   bool _isLanguageMenuVisible = false;
   bool _areSubtitlesVisible = true;
 
-  // END CALL - Navigation callback
+  // Navigation callback
   VoidCallback? onMeetingEnded;
 
-  // Getters
-  String get meetingCode => _meetingService.meetingId ?? 'Unknown';
-  Duration get elapsedTime => _meetingService.elapsedTime;
-  bool get isMicOn => !_getLocalParticipant().isMuted;
-  bool get isCameraOn => true; // Get from localStream's video track
-  bool get isScreenSharing => _getLocalParticipant().isScreenSharing;
-  bool get isHandRaised => _getLocalParticipant().isHandRaised;
+  // Constructor
+  MeetingController(this._mediaService) {
+    _mediaService.addListener(_syncStateFromService);
+  }
+
+  // === GETTERS ===
+  String get meetingCode => _mediaService.currentMeetingId ?? 'Unknown';
+  bool get isMicOn => _mediaService.isMicrophoneEnabled;
+  bool get isCameraOn => _mediaService.isCameraEnabled;
+  bool get isScreenSharing => _mediaService.isScreenSharing;
   bool get areSubtitlesVisible => _areSubtitlesVisible;
   bool get isChatVisible => _isChatVisible;
   bool get isParticipantsListVisible => _isParticipantsListVisible;
   bool get isLanguageMenuVisible => _isLanguageMenuVisible;
-  String get selectedLanguage => _meetingService.listeningLanguage;
-  List<ParticipantModel> get participants => _meetingService.participants;
-  List<SubtitleModel> get subtitles => _meetingService.subtitles;
+  bool get isHost => _mediaService.isHost;
+  bool get isMeetingActive => _mediaService.isMeetingActive;
+  bool get isConnectedToSFU => _mediaService.isConnectedToSFU;
+  String? get userId => _mediaService.currentUserId;
 
-  // END CALL - Additional getters
-  bool get isHost => _meetingService.isHost;
-  bool get isMeetingActive => _meetingService.isMeetingActive;
-  bool get isListening => _meetingService.isListening;
-  int get participantCount => _meetingService.participants.length;
+  // Convert participants map to list of ParticipantModel
+  List<ParticipantModel> get participants {
+    return _mediaService.participants.entries.map((entry) {
+      final data = entry.value;
+      return ParticipantModel(
+        id: entry.key,
+        name: data['displayName'] ?? 'Unknown',
+        isSpeaking: data['isSpeaking'] ?? false,
+        isMuted: data['isMuted'] ?? false,
+        isHost: data['role'] == 'host',
+        isHandRaised: data['isHandRaised'] ?? false,
+        isScreenSharing: data['isScreenSharing'] ?? false,
+      );
+    }).toList();
+  }
+
+  int get participantCount => participants.length;
+
+  // Get local renderer
+  dynamic get localRenderer => _mediaService.localRenderer;
+
+  // Mock properties for compatibility
+  Duration get elapsedTime => Duration.zero; // TODO: Implement timer
+  bool get isListening => false; // TODO: Implement speech recognition
+  List<SubtitleModel> get subtitles => []; // TODO: Implement subtitles
+  List<ChatMessage> get messages => []; // TODO: Implement chat messages
+  String get selectedLanguage => 'english'; // TODO: Implement language selection
+  bool get isHandRaised => false; // TODO: Get from current user participant data
 
   // Format elapsed time for display
   String get formattedElapsedTime {
@@ -50,135 +79,102 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
-  // Constructor
-  MeetingController(this._meetingService) {
-    // Listen for meeting service changes
-    _meetingService.addListener(_syncStateFromService);
-  }
+  // === CALLBACK MANAGEMENT ===
 
-  // END CALL - Set navigation callback
+  /// Set navigation callback for when meeting ends
   void setOnMeetingEndedCallback(VoidCallback callback) {
     onMeetingEnded = callback;
   }
 
-  // Get local participant
-  ParticipantModel _getLocalParticipant() {
-    if (_meetingService.participants.isEmpty) {
-      return ParticipantModel(
-        id: _meetingService.userId ?? 'unknown',
-        name: 'You',
-        isMuted: true,
-        isHost: _meetingService.isHost,
-      );
-    }
-
-    return _meetingService.participants.firstWhere(
-          (p) => p.id == _meetingService.userId,
-      orElse: () => ParticipantModel(
-        id: _meetingService.userId ?? 'unknown',
-        name: 'You',
-        isMuted: true,
-        isHost: _meetingService.isHost,
-      ),
-    );
-  }
-
-  // Sync controller from service changes
+  /// Sync controller state from service changes
   void _syncStateFromService() {
-    // END CALL - Check if meeting has ended
-    if (!_meetingService.isMeetingActive && _meetingService.meetingId == null) {
-      print('Meeting has ended, triggering navigation callback');
-      // Meeting has ended, trigger navigation callback
+    // Check if meeting has ended
+    if (!_mediaService.isMeetingActive && _mediaService.currentMeetingId == null) {
+      print('📱 Controller: Meeting has ended, triggering navigation callback');
       onMeetingEnded?.call();
+      return;
     }
+
     notifyListeners();
   }
 
-  // END CALL METHODS
+  // === MEDIA CONTROL METHODS ===
 
-  // End call method (for host - ends meeting for everyone)
-  Future<void> endCall() async {
+  /// Toggle microphone
+  Future<void> toggleMicrophone() async {
     try {
-      print('Ending call as host...');
-      await _meetingService.endMeetingForAll();
-
-      // Trigger navigation callback
-      onMeetingEnded?.call();
+      await _mediaService.toggleMicrophone();
+      notifyListeners();
     } catch (e) {
-      print('Error ending call: $e');
-      // Still trigger navigation even if there's an error
-      onMeetingEnded?.call();
+      print('❌ Controller: Error toggling microphone: $e');
     }
   }
 
-  // Leave call method (for participants)
-  Future<void> leaveCall() async {
+  /// Toggle camera
+  Future<void> toggleCamera() async {
     try {
-      print('Leaving call as participant...');
-      await _meetingService.leaveMeetingAsParticipant();
+      print('📹 Controller: Toggle camera called, current state: $isCameraOn');
+      await _mediaService.toggleCamera();
 
-      // Trigger navigation callback
-      onMeetingEnded?.call();
-    } catch (e) {
-      print('Error leaving call: $e');
-      // Still trigger navigation even if there's an error
-      onMeetingEnded?.call();
-    }
-  }
+      // Check if renderer is healthy after toggle
+      await Future.delayed(Duration(milliseconds: 500));
 
-  // Combined end/leave call method
-  Future<void> endOrLeaveCall() async {
-    if (isHost) {
-      await endCall();
-    } else {
-      await leaveCall();
-    }
-  }
-
-  // Legacy method - updated to use new logic
-  void leaveMeeting(BuildContext context) async {
-    try {
-      await endOrLeaveCall();
-      // Navigation will be handled by callback
-    } catch (e) {
-      print('Error in leaveMeeting: $e');
-      // Fallback navigation
-      if (context.mounted) {
-        Navigator.of(context).pop();
+      if (!isRendererHealthy() && _mediaService.isCameraEnabled) {
+        print('🔧 Controller: Renderer unhealthy after camera toggle, attempting recovery...');
+        await recoverRenderer();
       }
+
+      notifyListeners();
+    } catch (e) {
+      print('❌ Controller: Error in toggleCamera: $e');
+      await recoverRenderer();
     }
   }
 
-  // Methods to toggle controls
-  void toggleMicrophone() async {
-    await _meetingService.toggleMicrophone();
-    notifyListeners();
+  /// Switch camera
+  Future<void> switchCamera() async {
+    try {
+      await _mediaService.switchCamera();
+      await Future.delayed(Duration(milliseconds: 300));
+      notifyListeners();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error switching camera: $e');
+    }
   }
 
-  void toggleCamera() async {
-    await _meetingService.toggleCamera();
-    notifyListeners();
+  /// Toggle screen sharing
+  Future<void> toggleScreenSharing() async {
+    try {
+      await _mediaService.toggleScreenSharing();
+      notifyListeners();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error toggling screen sharing: $e');
+    }
   }
 
-  void toggleScreenSharing() async {
-    await _meetingService.toggleScreenSharing();
-    notifyListeners();
+  /// Toggle hand raised
+  Future<void> toggleHandRaised() async {
+    try {
+      await _mediaService.toggleHandRaised();
+      notifyListeners();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error toggling hand raised: $e');
+    }
   }
 
-  void toggleHandRaised() async {
-    await _meetingService.toggleHandRaised();
-    notifyListeners();
-  }
+  // === UI PANEL CONTROL METHODS ===
 
+  /// Toggle subtitles visibility
   void toggleSubtitlesVisibility() {
     _areSubtitlesVisible = !_areSubtitlesVisible;
     notifyListeners();
   }
 
+  /// Toggle chat panel
   void toggleChat() {
     _isChatVisible = !_isChatVisible;
 
-    // Close other panels
+    // Close other panels when opening chat
     if (_isChatVisible) {
       _isParticipantsListVisible = false;
       _isLanguageMenuVisible = false;
@@ -187,10 +183,11 @@ class MeetingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Toggle participants list panel
   void toggleParticipantsList() {
     _isParticipantsListVisible = !_isParticipantsListVisible;
 
-    // Close other panels
+    // Close other panels when opening participants list
     if (_isParticipantsListVisible) {
       _isChatVisible = false;
       _isLanguageMenuVisible = false;
@@ -199,10 +196,11 @@ class MeetingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Toggle language selection menu
   void toggleLanguageMenu() {
     _isLanguageMenuVisible = !_isLanguageMenuVisible;
 
-    // Close other panels
+    // Close other panels when opening language menu
     if (_isLanguageMenuVisible) {
       _isChatVisible = false;
       _isParticipantsListVisible = false;
@@ -211,7 +209,7 @@ class MeetingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // END CALL - Close all panels
+  /// Close all panels
   void closePanels() {
     _isChatVisible = false;
     _isParticipantsListVisible = false;
@@ -219,50 +217,186 @@ class MeetingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Set selected language preference
   void setSelectedLanguage(String language) {
-    _meetingService.setLanguagePreferences(
-        speaking: _meetingService.speakingLanguage,
-        listening: language
-    );
+    // TODO: Implement language selection in service
     _isLanguageMenuVisible = false;
     notifyListeners();
   }
 
-  // Speech recognition
-  void toggleSpeechRecognition() async {
-    await _meetingService.toggleSpeechRecognition();
+  // === SPEECH RECOGNITION METHODS (Placeholder) ===
+
+  /// Toggle speech recognition
+  Future<void> toggleSpeechRecognition() async {
+    try {
+      // TODO: Implement in service
+      print('🎤 Enhanced Controller: Speech recognition toggle requested');
+    } catch (e) {
+      print('❌ Enhanced Controller: Error toggling speech recognition: $e');
+    }
   }
 
-  // START/STOP speech recognition separately
+  /// Start speech recognition
   Future<void> startSpeechRecognition() async {
     try {
-      await _meetingService.startSpeechRecognition();
+      // TODO: Implement in service
+      print('🎤 Enhanced Controller: Speech recognition start requested');
     } catch (e) {
-      print('Error starting speech recognition: $e');
+      print('❌ Enhanced Controller: Error starting speech recognition: $e');
     }
   }
 
+  /// Stop speech recognition
   Future<void> stopSpeechRecognition() async {
     try {
-      await _meetingService.stopSpeechRecognition();
+      // TODO: Implement in service
+      print('🎤 Enhanced Controller: Speech recognition stop requested');
     } catch (e) {
-      print('Error stopping speech recognition: $e');
+      print('❌ Enhanced Controller: Error stopping speech recognition: $e');
     }
   }
 
-  // Send message
+  // === COMMUNICATION METHODS ===
+
+  /// Send a chat message
   void sendMessage(String message) async {
-    await _meetingService.sendMessage(message);
+    if (message.trim().isNotEmpty) {
+      try {
+        await _mediaService.sendMessage(message.trim());
+      } catch (e) {
+        print('❌ Enhanced Controller: Error sending message: $e');
+      }
+    }
   }
 
-  // Get renderer for a participant
+  // === VIDEO RENDERER METHODS ===
+
+  /// Get video renderer for a specific participant
   dynamic getRendererForParticipant(String participantId) {
-    return _meetingService.getRendererForParticipant(participantId);
+    try {
+      return _mediaService.getRendererForParticipant(participantId);
+    } catch (e) {
+      print('❌ Enhanced Controller: Error getting renderer for participant $participantId: $e');
+      return null;
+    }
   }
 
-  // END CALL - Utility methods
+  /// Check if participant has video
+  bool participantHasVideo(String participantId) {
+    try {
+      return _mediaService.participantHasVideo(participantId);
+    } catch (e) {
+      print('❌ Enhanced Controller: Error checking video for participant $participantId: $e');
+      return false;
+    }
+  }
 
-  // Get current speaking participant
+  /// Check if renderer is healthy
+  bool isRendererHealthy() {
+    try {
+      return _mediaService.isRendererHealthy();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error checking renderer health: $e');
+      return false;
+    }
+  }
+
+  /// Recover renderer from errors
+  Future<void> recoverRenderer() async {
+    try {
+      await _mediaService.recoverFromRendererError();
+      notifyListeners();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error recovering renderer: $e');
+    }
+  }
+
+  /// Refresh all participant video streams
+  Future<void> refreshParticipantStreams() async {
+    try {
+      print('🔄 Enhanced Controller: Refreshing participant streams...');
+      await _mediaService.refreshAllParticipantStreams();
+
+      // Wait a bit for streams to be established
+      await Future.delayed(Duration(milliseconds: 1000));
+      notifyListeners();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error refreshing participant streams: $e');
+    }
+  }
+
+  /// Force refresh of a specific participant's video
+  Future<void> refreshParticipantVideo(String participantId) async {
+    try {
+      print('🔄 Enhanced Controller: Refreshing video for participant $participantId');
+      await _mediaService.requestParticipantStream(participantId);
+
+      await Future.delayed(Duration(milliseconds: 500));
+      notifyListeners();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error refreshing video for participant $participantId: $e');
+    }
+  }
+
+  // === MEETING CONTROL METHODS ===
+
+  /// End call method (for host - ends meeting for everyone)
+  Future<void> endCall() async {
+    try {
+      print('📱 Enhanced Controller: Ending call as host...');
+      await _mediaService.endMeetingForAll();
+      onMeetingEnded?.call();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error ending call: $e');
+      onMeetingEnded?.call();
+    }
+  }
+
+  /// Leave call method (for participants)
+  Future<void> leaveCall() async {
+    try {
+      print('📱 Enhanced Controller: Leaving call as participant...');
+      await _mediaService.leaveMeetingAsParticipant();
+      onMeetingEnded?.call();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error leaving call: $e');
+      onMeetingEnded?.call();
+    }
+  }
+
+  /// Combined end/leave call method
+  Future<void> endOrLeaveCall() async {
+    if (isHost) {
+      await endCall();
+    } else {
+      await leaveCall();
+    }
+  }
+
+  /// Legacy method - updated to use new logic
+  void leaveMeeting(BuildContext context) async {
+    try {
+      await endOrLeaveCall();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error in leaveMeeting: $e');
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+  // === PARTICIPANT MANAGEMENT ===
+
+  /// Get participant by ID
+  ParticipantModel? getParticipantById(String participantId) {
+    try {
+      return participants.firstWhere((p) => p.id == participantId);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Get current speaking participant
   ParticipantModel? getCurrentSpeakingParticipant() {
     try {
       return participants.firstWhere((p) => p.isSpeaking);
@@ -271,31 +405,193 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
-  // Get local participant (public method)
+  /// Get local participant
   ParticipantModel? getLocalParticipant() {
     try {
-      return participants.firstWhere((p) => p.id == _meetingService.userId);
+      return participants.firstWhere((p) => p.id == _mediaService.currentUserId);
     } catch (e) {
       return null;
     }
   }
 
-  // Check if user is the only participant
+  /// Get main display participant (speaker or self)
+  ParticipantModel getMainDisplayParticipant() {
+    // Priority: Current speaker > Local user > Host > First participant
+    final speaker = getCurrentSpeakingParticipant();
+    if (speaker != null) return speaker;
+
+    final localUser = participants.firstWhere(
+          (p) => p.id == userId,
+      orElse: () => participants.isNotEmpty ? participants.first :
+      ParticipantModel(id: 'unknown', name: 'Unknown'),
+    );
+
+    return localUser;
+  }
+
+  /// Check if user is the only participant
   bool get isOnlyParticipant => participants.length <= 1;
 
-  // Better camera state detection
-  bool get isCameraOnDetailed {
-    if (_meetingService.localRenderer?.srcObject == null) return false;
-
-    // You can implement more detailed camera detection here
-    // For now, return true if we have local renderer
-    return _meetingService.localRenderer?.srcObject != null;
+  /// Check if participant is speaking
+  bool isParticipantSpeaking(String participantId) {
+    final participant = getParticipantById(participantId);
+    return participant?.isSpeaking ?? false;
   }
+
+  // === UTILITY METHODS ===
+
+  /// Get meeting status with video info
+  Map<String, dynamic> getMeetingStatus() {
+    return {
+      'meetingId': meetingCode,
+      'isHost': isHost,
+      'participantCount': participantCount,
+      'isActive': isMeetingActive,
+      'isConnectedToSFU': isConnectedToSFU,
+      'elapsedTime': formattedElapsedTime,
+      'micEnabled': isMicOn,
+      'cameraEnabled': isCameraOn,
+      'isListening': isListening,
+      'videoStats': getParticipantVideoStats(),
+      'rendererHealth': getAllRendererHealth(),
+      'mainSpeaker': getCurrentSpeakingParticipant()?.name ?? 'None',
+    };
+  }
+
+  /// Get participant video statistics
+  Map<String, bool> getParticipantVideoStats() {
+    final stats = <String, bool>{};
+    for (var participant in participants) {
+      stats[participant.id] = participantHasVideo(participant.id);
+    }
+    return stats;
+  }
+
+  /// Get renderer health status for all participants
+  Map<String, bool> getAllRendererHealth() {
+    final health = <String, bool>{};
+
+    // Check local renderer
+    health['local'] = isRendererHealthy();
+
+    // Check participant renderers
+    for (var participant in participants) {
+      if (participant.id != userId) {
+        health[participant.id] = participantHasVideo(participant.id);
+      }
+    }
+
+    return health;
+  }
+
+  /// Get recent subtitles (last 3)
+  List<SubtitleModel> get recentSubtitles {
+    return subtitles.take(3).toList();
+  }
+
+  /// Get unread message count (placeholder)
+  int get unreadMessageCount {
+    // TODO: Implement unread message tracking
+    return 0;
+  }
+
+  /// Get count of participants with video
+  int get participantsWithVideoCount {
+    return participants.where((p) => participantHasVideo(p.id)).length;
+  }
+
+  /// Get count of participants with audio
+  int get participantsWithAudioCount {
+    return participants.where((p) => !p.isMuted).length;
+  }
+
+  // === DEBUG METHODS ===
+
+  /// Debug method to check all renderer states
+  Future<void> debugAllRenderers() async {
+    try {
+      await _mediaService.debugAllParticipants();
+
+      print('=== 📱 ENHANCED CONTROLLER DEBUG ===');
+      for (var participant in participants) {
+        final hasRenderer = getRendererForParticipant(participant.id) != null;
+        final hasVideo = participantHasVideo(participant.id);
+        print('📱 ${participant.name}: renderer=$hasRenderer, video=$hasVideo');
+      }
+      print('===============================');
+    } catch (e) {
+      print('❌ Enhanced Controller: Error in debug: $e');
+    }
+  }
+
+  /// Test all video connections
+  Future<void> testAllVideoConnections() async {
+    try {
+      print('🧪 Enhanced Controller: Testing all video connections...');
+
+      // Test local video
+      final localHealthy = isRendererHealthy();
+      print('📹 Local video: ${localHealthy ? "OK" : "FAILED"}');
+
+      // Test remote videos
+      for (var participant in participants) {
+        if (participant.id != userId) {
+          final hasVideo = participantHasVideo(participant.id);
+          print('📹 ${participant.name} video: ${hasVideo ? "OK" : "FAILED"}');
+
+          if (!hasVideo) {
+            // Try to refresh this participant's stream
+            await refreshParticipantVideo(participant.id);
+          }
+        }
+      }
+
+      print('✅ Enhanced Controller: Video connection test completed');
+    } catch (e) {
+      print('❌ Enhanced Controller: Error testing video connections: $e');
+    }
+  }
+
+  /// Emergency video recovery for all participants
+  Future<void> emergencyVideoRecovery() async {
+    try {
+      print('🚨 Enhanced Controller: Starting emergency video recovery...');
+
+      // Recover local video first
+      await recoverRenderer();
+
+      // Wait a bit
+      await Future.delayed(Duration(milliseconds: 1000));
+
+      // Refresh all participant streams
+      await refreshParticipantStreams();
+
+      // Wait for recovery
+      await Future.delayed(Duration(milliseconds: 2000));
+
+      print('✅ Enhanced Controller: Emergency video recovery completed');
+      notifyListeners();
+    } catch (e) {
+      print('❌ Enhanced Controller: Error in emergency video recovery: $e');
+    }
+  }
+
+  /// Test SFU connection
+  Future<void> testSFUConnection() async {
+    try {
+      final isConnected = await _mediaService.testSFUConnection();
+      print('🌐 Enhanced Controller: SFU connection test result: $isConnected');
+    } catch (e) {
+      print('❌ Enhanced Controller: Error testing SFU connection: $e');
+    }
+  }
+
+  // === CLEANUP ===
 
   @override
   void dispose() {
-    print('Disposing MeetingController...');
-    _meetingService.removeListener(_syncStateFromService);
+    print('♻️ Controller: Disposing MeetingController...');
+    _mediaService.removeListener(_syncStateFromService);
     super.dispose();
   }
 }

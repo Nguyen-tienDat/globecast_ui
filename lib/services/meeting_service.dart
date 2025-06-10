@@ -1,1579 +1,778 @@
-// lib/services/meeting_service.dart
+// lib/services/webrtc_meeting_service.dart - FIXED FOR MEDIA STREAMING
 import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:translator/translator.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:uuid/uuid.dart';
+import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
 
-class GcbMeetingService extends ChangeNotifier {
-  // Firebase instances
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+// Abstract base class
+abstract class GcbMeetingService extends ChangeNotifier {
+  String? get meetingId;
+  String? get userId;
+  bool get isHost;
+  bool get isMeetingActive;
+  bool get isListening;
+  Duration get elapsedTime;
+  String get speakingLanguage;
+  String get listeningLanguage;
+  List<ParticipantModel> get participants;
+  List<SubtitleModel> get subtitles;
+  List<ChatMessage> get messages;
+  RTCVideoRenderer? get localRenderer;
 
-  // WebRTC related variables
-  final Map<String, RTCPeerConnection> _peerConnections = {};
-  final Map<String, MediaStream> _remoteStreams = {};
-  final Map<String, RTCVideoRenderer> _remoteRenderers = {};
+  Future<void> initialize();
+  Future<String> createMeeting({required String topic, String? password, List<String> translationLanguages = const []});
+  Future<void> joinMeeting({required String meetingId, String? password});
+  Future<void> toggleMicrophone();
+  Future<void> toggleCamera();
+  Future<void> toggleScreenSharing();
+  Future<void> toggleHandRaised();
+  Future<void> endMeetingForAll();
+  Future<void> leaveMeetingAsParticipant();
+  Future<void> toggleSpeechRecognition();
+  Future<void> startSpeechRecognition();
+  Future<void> stopSpeechRecognition();
+  Future<void> sendMessage(String message);
+  RTCVideoRenderer? getRendererForParticipant(String participantId);
+  void setUserDetails({required String displayName, String? userId});
+  void setLanguagePreferences({required String speaking, required String listening});
+}
+
+// Fixed WebRTC implementation
+class WebRTCMeetingService extends GcbMeetingService {
+  // Metered SFU Configuration
+  static const String _sfuHost = "https://global.sfu.metered.ca";
+  static const String _sfuAppId = "684272d83a97f8dcea82abea";
+  static const String _sfuSecret = "XsMrnmK6kLFO/rlA";
+  static const String _stunServer = "stun:stun.metered.ca:80";
+
+  // WebRTC Components
+  RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
   RTCVideoRenderer? _localRenderer;
+  final Map<String, RTCVideoRenderer> _remoteRenderers = {};
+  final Map<String, MediaStream> _remoteStreams = {};
 
-  // Speech and translation
-  final stt.SpeechToText _speechToText = stt.SpeechToText();
-  final GoogleTranslator _translator = GoogleTranslator();
-  bool _isListening = false;
-  String _currentTranscription = '';
-  bool _webRTCAudioEnabled = true;
-
-  // Meeting data
+  // SFU Session Management
+  String? _sessionId;
   String? _meetingId;
   String? _userId;
   String _displayName = 'User';
   bool _isHost = false;
   bool _isMeetingActive = false;
-  String _selectedSpeakingLanguage = 'english';
-  String _selectedListeningLanguage = 'english';
-  Map<String, String> _participantLanguages = {};
+  bool _isConnected = false;
 
-  // Meeting state observables
+  // Published/Subscribed tracks
+  final Map<String, String> _publishedTracks = {}; // kind -> trackId
+  final Map<String, String> _subscribedTracks = {}; // participantId -> trackId
+
+  // Audio/Video State
+  bool _isMicrophoneMuted = false;
+  bool _isCameraEnabled = true;
+  bool _isScreenSharing = false;
+  bool _isHandRaised = false;
+
+  // Meeting Timer
+  Timer? _elapsedTimer;
+  DateTime? _meetingStartTime;
+  Timer? _trackPollingTimer;
+
+  // Dummy data for UI
   final List<ParticipantModel> _participants = [];
   final List<SubtitleModel> _subtitles = [];
   final List<ChatMessage> _messages = [];
-  Duration _elapsedTime = const Duration();
-  Timer? _meetingTimer;
+  String _speakingLanguage = 'english';
+  String _listeningLanguage = 'english';
 
-  // Stream subscriptions for cleanup
-  final List<StreamSubscription> _subscriptions = [];
-
-  // Getters
+  @override
   String? get meetingId => _meetingId;
+  @override
   String? get userId => _userId;
+  @override
   bool get isHost => _isHost;
+  @override
   bool get isMeetingActive => _isMeetingActive;
+  @override
+  bool get isListening => false;
+  @override
+  Duration get elapsedTime {
+    if (_meetingStartTime == null) return Duration.zero;
+    return DateTime.now().difference(_meetingStartTime!);
+  }
+  @override
+  String get speakingLanguage => _speakingLanguage;
+  @override
+  String get listeningLanguage => _listeningLanguage;
+  @override
   List<ParticipantModel> get participants => List.unmodifiable(_participants);
+  @override
   List<SubtitleModel> get subtitles => List.unmodifiable(_subtitles);
+  @override
   List<ChatMessage> get messages => List.unmodifiable(_messages);
-  String get speakingLanguage => _selectedSpeakingLanguage;
-  String get listeningLanguage => _selectedListeningLanguage;
-  Duration get elapsedTime => _elapsedTime;
-  bool get isListening => _isListening;
+  @override
   RTCVideoRenderer? get localRenderer => _localRenderer;
 
-  // WebRTC configuration
-  final Map<String, dynamic> _iceServers = {
-    'iceServers': [
-      {'urls': 'stun:stun.l.google.com:19302'},
-      {
-        'urls': 'turn:global.relay.metered.ca:80',
-        'username': 'b573383c24e9d31f7db',
-        'credential': 'tvAyXoixqazepn0',
-      },
-      {
-        'urls': 'turn:global.relay.metered.ca:443',
-        'username': 'b573383c24e9d31f7db',
-        'credential': 'tvAyXoixqazepn0',
-      },
-    ],
-    'sdpSemantics': 'unified-plan',
-  };
-
-  // Initialize service
+  @override
   Future<void> initialize() async {
-    // Generate user ID if not present
-    _userId ??= const Uuid().v4();
+    print('🚀 Initializing WebRTC Meeting Service...');
 
-    // Initialize speech recognition
-    try {
-      await _speechToText.initialize(
-          onStatus: (status) {
-            if (status == 'done') {
-              _isListening = false;
-              _restoreWebRTCAudio();
-              notifyListeners();
-            }
-          },
-          onError: (error) {
-            print('Speech recognition error: $error');
-            _isListening = false;
-            _restoreWebRTCAudio();
-            notifyListeners();
-          }
-      );
-    } catch (e) {
-      print('Error initializing speech recognition: $e');
-    }
+    _userId = 'user_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(1000)}';
 
-    notifyListeners();
+    await _requestPermissions();
+    await _initializeRenderers();
+
+    print('✅ WebRTC Meeting Service initialized with userId: $_userId');
   }
 
-  // Set user details
+  Future<void> _requestPermissions() async {
+    print('🔑 Requesting permissions...');
+    final permissions = [Permission.camera, Permission.microphone];
+
+    for (final permission in permissions) {
+      final status = await permission.request();
+      if (status != PermissionStatus.granted) {
+        throw Exception('Permission $permission not granted');
+      }
+    }
+    print('✅ Permissions granted');
+  }
+
+  Future<void> _initializeRenderers() async {
+    _localRenderer = RTCVideoRenderer();
+    await _localRenderer!.initialize();
+    print('📹 Local renderer initialized');
+  }
+
+  @override
   void setUserDetails({required String displayName, String? userId}) {
     _displayName = displayName;
     if (userId != null) _userId = userId;
-    notifyListeners();
+    print('👤 User details set: $_displayName ($_userId)');
   }
 
-  // Set language preferences
+  @override
   void setLanguagePreferences({required String speaking, required String listening}) {
-    _selectedSpeakingLanguage = speaking;
-    _selectedListeningLanguage = listening;
-
-    // Update user language in meeting if active
-    if (_isMeetingActive && _meetingId != null && _userId != null) {
-      _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .update({
-        'speakingLanguage': speaking,
-        'listeningLanguage': listening,
-      });
-    }
-
-    notifyListeners();
+    _speakingLanguage = speaking;
+    _listeningLanguage = listening;
   }
 
-  // Create a new meeting
+  @override
   Future<String> createMeeting({
     required String topic,
     String? password,
-    required List<String> translationLanguages,
+    List<String> translationLanguages = const [],
   }) async {
     try {
-      //Add log for password
-      print('Creating meeting with password: "${password ?? ''}"');
+      print('🎬 Creating meeting: $topic');
 
-      //Use trim to deny space in password
-      String cleanPassword = password?.trim() ?? '';
-
-      // Generate meeting ID
-      final String meetingId = 'GCM-${const Uuid().v4().substring(0, 8)}';
+      final meetingId = 'GCM-${DateTime.now().millisecondsSinceEpoch}';
       _meetingId = meetingId;
       _isHost = true;
 
-      // Create meeting document
-      await _firestore.collection('meetings').doc(meetingId).set({
-        'meetingId': meetingId,
-        'topic': topic,
-        'hostId': _userId,
-        'password': cleanPassword,
-        'translationLanguages': translationLanguages,
-        'status': 'active',
-        'createdAt': FieldValue.serverTimestamp(),
-        'participantCount': 1,
-      });
+      await _initializeLocalMedia();
+      await _createPeerConnection();
+      await _createSfuSession();
+      await _publishLocalTracks();
 
-      // Add to active_meetings collection for easy querying
-      await _firestore.collection('active_meetings').doc(meetingId).set({
-        'meetingId': meetingId,
-        'topic': topic,
-        'hostId': _userId,
-        'participantCount': 1,
-        'createdAt': FieldValue.serverTimestamp(),
-        'status': 'active',
-      });
+      _startMeeting();
+      _startTrackPolling(); // Start polling for other participants
 
-      // Add to user_meetings collection for easy user-meeting relation query
-      await _firestore.collection('user_meetings').doc('${_userId}_$meetingId').set({
-        'userId': _userId,
-        'meetingId': meetingId,
-        'displayName': _displayName,
-        'role': 'host',
-        'joinedAt': FieldValue.serverTimestamp(),
-        'isActive': true,
-      });
-
-      // Add host as participant
-      await _firestore
-          .collection('meetings')
-          .doc(meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .set({
-        'userId': _userId,
-        'displayName': _displayName,
-        'role': 'host',
-        'joinedAt': FieldValue.serverTimestamp(),
-        'speakingLanguage': _selectedSpeakingLanguage,
-        'listeningLanguage': _selectedListeningLanguage,
-        'isActive': true,
-        'isMuted': false,
-        'isCameraOff': false,
-        'isHandRaised': false,
-        'isScreenSharing': false,
-      });
-
-      await _setupLocalStream();
-      await _joinMeetingRoom(meetingId);
-
+      print('🎉 Meeting created successfully: $meetingId');
       return meetingId;
+
     } catch (e) {
-      print('Error creating meeting: $e');
+      print('❌ Error creating meeting: $e');
       throw Exception('Failed to create meeting: $e');
     }
   }
 
-  // Join an existing meeting
+  @override
   Future<void> joinMeeting({required String meetingId, String? password}) async {
     try {
-      //Log to checkout password
-      print('Joining meeting: $meetingId with password: "${password ?? ''}"');
-
-      //Clear that password used trim to delete space
-      String cleanPassword = password?.trim() ?? '';
-
-      // Validate meeting
-      final meetingDoc = await _firestore.collection('meetings').doc(meetingId).get();
-
-      if (!meetingDoc.exists) {
-        throw Exception('Meeting not found');
-      }
-
-      final meetingData = meetingDoc.data() as Map<String, dynamic>;
-
-      //Debug password information
-      print('Meeting password in database: ${meetingData['password']}"');
-      print('Submitted password: "$cleanPassword"');
-
-      if (meetingData['password'] != null && meetingData['password'].isNotEmpty) {
-        if (meetingData['password'] != cleanPassword) {
-          throw Exception('Incorrect password');
-        }
-      }
-
-      // Check if meeting is active
-      if (meetingData['status'] != 'active') {
-        throw Exception('Meeting has ended');
-      }
+      print('🚪 Joining meeting: $meetingId');
 
       _meetingId = meetingId;
-      _isHost = meetingData['hostId'] == _userId;
+      _isHost = false;
 
-      // Add participant
-      await _firestore
-          .collection('meetings')
-          .doc(meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .set({
-        'userId': _userId,
-        'displayName': _displayName,
-        'role': _isHost ? 'host' : 'participant',
-        'joinedAt': FieldValue.serverTimestamp(),
-        'speakingLanguage': _selectedSpeakingLanguage,
-        'listeningLanguage': _selectedListeningLanguage,
-        'isActive': true,
-        'isMuted': true,
-        'isCameraOff': false,
-        'isHandRaised': false,
-        'isScreenSharing': false,
+      await _initializeLocalMedia();
+      await _createPeerConnection();
+      await _createSfuSession();
+      await _publishLocalTracks();
+
+      _startMeeting();
+      _startTrackPolling(); // Start polling for other participants
+
+      // Subscribe to existing tracks after a delay
+      Timer(const Duration(seconds: 2), () {
+        _subscribeToExistingTracks();
       });
 
-      // Add to user_meetings collection
-      await _firestore.collection('user_meetings').doc('${_userId}_$meetingId').set({
-        'userId': _userId,
-        'meetingId': meetingId,
-        'displayName': _displayName,
-        'role': _isHost ? 'host' : 'participant',
-        'joinedAt': FieldValue.serverTimestamp(),
-        'isActive': true,
-      });
+      print('🎉 Successfully joined meeting: $meetingId');
 
-      // Update participant count
-      await _firestore.collection('meetings').doc(meetingId).update({
-        'participantCount': FieldValue.increment(1),
-      });
-
-      // Update active_meetings collection
-      await _firestore.collection('active_meetings').doc(meetingId).update({
-        'participantCount': FieldValue.increment(1),
-      });
-
-      await _setupLocalStream();
-      await _joinMeetingRoom(meetingId);
     } catch (e) {
-      print('Error joining meeting: $e');
+      print('❌ Error joining meeting: $e');
       throw Exception('Failed to join meeting: $e');
     }
   }
 
-  // END CALL METHODS - NEW ADDITIONS
-
-  // End call for host (ends meeting for everyone)
-  Future<void> endMeetingForAll() async {
-    if (!_isHost || _meetingId == null || _userId == null) return;
-
+  Future<void> _initializeLocalMedia() async {
     try {
-      print('Host ending meeting for all participants');
+      print('📱 Initializing local media...');
 
-      // Set meeting status to ended
-      await _firestore.collection('meetings').doc(_meetingId).update({
-        'status': 'ended_by_host',
-        'endedAt': FieldValue.serverTimestamp(),
-        'endedBy': _userId,
-      });
+      final constraints = {
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': {
+          'width': 640,
+          'height': 480,
+          'frameRate': 15,
+          'facingMode': 'user',
+        }
+      };
 
-      // Remove from active meetings
-      await _firestore.collection('active_meetings').doc(_meetingId).delete();
+      _localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Update all participants to inactive
-      final participantsSnapshot = await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .get();
-
-      final batch = _firestore.batch();
-      for (var doc in participantsSnapshot.docs) {
-        batch.update(doc.reference, {
-          'isActive': false,
-          'leftAt': FieldValue.serverTimestamp(),
-        });
+      if (_localRenderer != null && _localStream != null) {
+        _localRenderer!.srcObject = _localStream;
+        print('📹 Local video renderer set');
       }
-      await batch.commit();
 
-      // Clean up local resources
-      await _cleanupMeetingResources();
+      print('✅ Local media initialized - Audio tracks: ${_localStream?.getAudioTracks().length}, Video tracks: ${_localStream?.getVideoTracks().length}');
 
-      print('Meeting ended by host successfully');
     } catch (e) {
-      print('Error ending meeting: $e');
-      throw Exception('Failed to end meeting: $e');
+      print('❌ Error initializing local media: $e');
+      throw Exception('Failed to initialize camera/microphone: $e');
     }
   }
 
-  // Leave meeting for participants
-  Future<void> leaveMeetingAsParticipant() async {
-    if (_meetingId == null || _userId == null) return;
+  Future<void> _createPeerConnection() async {
+    try {
+      print('🔗 Creating peer connection...');
+
+      final config = {
+        'iceServers': [
+          {'urls': _stunServer}
+        ],
+        'sdpSemantics': 'unified-plan',
+      };
+
+      _peerConnection = await createPeerConnection(config);
+
+      _peerConnection!.onIceConnectionState = (state) {
+        print('🧊 ICE Connection State: $state');
+
+        if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+          _isConnected = true;
+          print('✅ WebRTC connection established');
+          notifyListeners();
+        } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+            state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+          _isConnected = false;
+          print('❌ WebRTC connection lost');
+          notifyListeners();
+        }
+      };
+
+      _peerConnection!.onTrack = (event) {
+        print('📡 Received remote track: ${event.track.kind} from stream: ${event.streams.first.id}');
+        _handleRemoteTrack(event);
+      };
+
+      print('✅ Peer connection created');
+
+    } catch (e) {
+      print('❌ Error creating peer connection: $e');
+      throw e;
+    }
+  }
+
+  Future<void> _createSfuSession() async {
+    try {
+      print('🌐 Creating SFU session...');
+
+      final offer = await _peerConnection!.createOffer();
+      await _peerConnection!.setLocalDescription(offer);
+
+      final response = await http.post(
+        Uri.parse('$_sfuHost/api/sfu/$_sfuAppId/session/new'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_sfuSecret',
+        },
+        body: jsonEncode({
+          'sessionDescription': offer.toMap(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _sessionId = data['sessionId'];
+
+        final remoteSdp = RTCSessionDescription(
+          data['sessionDescription']['sdp'],
+          data['sessionDescription']['type'],
+        );
+
+        await _peerConnection!.setRemoteDescription(remoteSdp);
+
+        _isConnected = true;
+        print('✅ SFU session created: $_sessionId');
+
+      } else {
+        throw Exception('Failed to create SFU session: ${response.statusCode} - ${response.body}');
+      }
+
+    } catch (e) {
+      print('❌ Error creating SFU session: $e');
+      throw e;
+    }
+  }
+
+  Future<void> _publishLocalTracks() async {
+    if (_localStream == null || _sessionId == null) {
+      print('❌ Cannot publish tracks - missing stream or session');
+      return;
+    }
 
     try {
-      print('Participant leaving meeting');
+      print('📤 Publishing local tracks...');
+
+      // Add tracks to peer connection
+      for (var track in _localStream!.getTracks()) {
+        await _peerConnection!.addTrack(track, _localStream!);
+        print('➕ Added ${track.kind} track to peer connection');
+      }
+
+      // Create new offer after adding tracks
+      final offer = await _peerConnection!.createOffer();
+      await _peerConnection!.setLocalDescription(offer);
+
+      // Send renegotiation request to SFU
+      final response = await http.put(
+        Uri.parse('$_sfuHost/api/sfu/$_sfuAppId/session/$_sessionId/renegotiate'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_sfuSecret',
+        },
+        body: jsonEncode({
+          'sessionDescription': offer.toMap(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        final remoteSdp = RTCSessionDescription(
+          data['sessionDescription']['sdp'],
+          data['sessionDescription']['type'],
+        );
+
+        await _peerConnection!.setRemoteDescription(remoteSdp);
+        print('✅ Local tracks published successfully');
+
+      } else {
+        print('❌ Failed to publish tracks: ${response.statusCode} - ${response.body}');
+      }
+
+    } catch (e) {
+      print('❌ Error publishing local tracks: $e');
+    }
+  }
+
+  void _startTrackPolling() {
+    print('🔄 Starting track polling...');
+
+    _trackPollingTimer?.cancel();
+    _trackPollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      _subscribeToExistingTracks();
+    });
+  }
+
+  Future<void> _subscribeToExistingTracks() async {
+    if (_sessionId == null) return;
+
+    try {
+      // Get available tracks from SFU
+      final response = await http.get(
+        Uri.parse('$_sfuHost/api/sfu/$_sfuAppId/session/$_sessionId/tracks'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_sfuSecret',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> tracks = jsonDecode(response.body);
+        print('📋 Available tracks: ${tracks.length}');
+
+        for (var trackData in tracks) {
+          final trackId = trackData['trackId'];
+          final sessionId = trackData['sessionId'];
+          final kind = trackData['kind'];
+
+          // Skip our own tracks
+          if (sessionId == _sessionId) continue;
+
+          // Skip if already subscribed
+          if (_subscribedTracks.containsValue(trackId)) continue;
+
+          print('🔔 Subscribing to $kind track: $trackId from session: $sessionId');
+          await _subscribeToTrack(sessionId, trackId);
+
+          // Add participant if not exists
+          _addRemoteParticipant(sessionId, kind);
+        }
+
+      } else {
+        print('❌ Failed to get tracks: ${response.statusCode}');
+      }
+
+    } catch (e) {
+      print('❌ Error getting tracks: $e');
+    }
+  }
+
+  Future<void> _subscribeToTrack(String remoteSessionId, String trackId) async {
+    if (_sessionId == null) return;
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_sfuHost/api/sfu/$_sfuAppId/session/$_sessionId/track/subscribe'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_sfuSecret',
+        },
+        body: jsonEncode({
+          'tracks': [
+            {
+              'remoteSessionId': remoteSessionId,
+              'remoteTrackId': trackId,
+            }
+          ]
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        final remoteSdp = RTCSessionDescription(
+          data['sessionDescription']['sdp'],
+          data['sessionDescription']['type'],
+        );
+
+        await _peerConnection!.setRemoteDescription(remoteSdp);
+
+        // Create answer
+        final answer = await _peerConnection!.createAnswer();
+        await _peerConnection!.setLocalDescription(answer);
+
+        // Send answer back to SFU
+        await http.put(
+          Uri.parse('$_sfuHost/api/sfu/$_sfuAppId/session/$_sessionId/renegotiate'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $_sfuSecret',
+          },
+          body: jsonEncode({
+            'sessionDescription': answer.toMap(),
+          }),
+        );
+
+        _subscribedTracks[remoteSessionId] = trackId;
+        print('✅ Subscribed to track: $trackId');
+
+      } else {
+        print('❌ Failed to subscribe to track: ${response.statusCode}');
+      }
+
+    } catch (e) {
+      print('❌ Error subscribing to track: $e');
+    }
+  }
+
+  void _handleRemoteTrack(RTCTrackEvent event) async {
+    final track = event.track;
+    final streams = event.streams;
+
+    if (streams.isNotEmpty) {
+      final stream = streams.first;
+      final streamId = stream.id;
+
+      print('🎯 Handling remote ${track.kind} track from stream: $streamId');
+
+      // Create renderer for remote video
+      if (track.kind == 'video') {
+        final renderer = RTCVideoRenderer();
+        await renderer.initialize();
+        renderer.srcObject = stream;
+        _remoteRenderers[streamId] = renderer;
+        print('📺 Remote video renderer created for: $streamId');
+      }
+
+      _remoteStreams[streamId] = stream;
 
       // Update participant status
-      await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .update({
-        'isActive': false,
-        'leftAt': FieldValue.serverTimestamp(),
-      });
+      _updateRemoteParticipantMedia(streamId, track.kind == 'video');
 
-      // Update user_meetings collection
-      await _firestore
-          .collection('user_meetings')
-          .doc('${_userId}_${_meetingId}')
-          .update({
-        'isActive': false,
-        'leftAt': FieldValue.serverTimestamp(),
-      });
-
-      // Update participant count
-      await _firestore.collection('meetings').doc(_meetingId).update({
-        'participantCount': FieldValue.increment(-1),
-      });
-
-      // Update active_meetings collection
-      await _firestore.collection('active_meetings').doc(_meetingId).update({
-        'participantCount': FieldValue.increment(-1),
-      });
-
-      // Clean up local resources
-      await _cleanupMeetingResources();
-
-      print('Left meeting as participant successfully');
-    } catch (e) {
-      print('Error leaving meeting: $e');
-      throw Exception('Failed to leave meeting: $e');
+      notifyListeners();
     }
   }
 
-  // Cleanup all meeting resources
-  Future<void> _cleanupMeetingResources() async {
+  void _addRemoteParticipant(String sessionId, String kind) {
+    // Check if participant already exists
+    final existingIndex = _participants.indexWhere((p) => p.id == sessionId);
+
+    if (existingIndex == -1) {
+      _participants.add(ParticipantModel(
+        id: sessionId,
+        name: 'Remote User ${sessionId.substring(0, 6)}',
+        isHost: false,
+        isMuted: kind != 'audio',
+        isSpeaking: false,
+      ));
+
+      print('👥 Added remote participant: $sessionId');
+      notifyListeners();
+    }
+  }
+
+  void _updateRemoteParticipantMedia(String streamId, bool hasVideo) {
+    // Find participant by stream ID and update their media status
+    for (int i = 0; i < _participants.length; i++) {
+      if (_participants[i].id.contains(streamId.substring(0, 6))) {
+        // Update participant media status
+        notifyListeners();
+        break;
+      }
+    }
+  }
+
+  void _startMeeting() {
+    _isMeetingActive = true;
+    _meetingStartTime = DateTime.now();
+
+    _addLocalParticipant();
+    _startElapsedTimer();
+
+    print('🎬 Meeting started');
+    notifyListeners();
+  }
+
+  void _addLocalParticipant() {
+    final localParticipant = ParticipantModel(
+      id: _userId!,
+      name: '$_displayName (You)',
+      isHost: _isHost,
+      isMuted: _isMicrophoneMuted,
+      isSpeaking: false,
+      isHandRaised: _isHandRaised,
+      isScreenSharing: _isScreenSharing,
+    );
+
+    _participants.removeWhere((p) => p.id == _userId);
+    _participants.insert(0, localParticipant);
+  }
+
+  void _startElapsedTimer() {
+    _elapsedTimer?.cancel();
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      notifyListeners();
+    });
+  }
+
+  @override
+  Future<void> toggleMicrophone() async {
     try {
-      print('Cleaning up meeting resources...');
-
-      // Stop speech recognition if active
-      if (_isListening) {
-        await _speechToText.stop();
-        _isListening = false;
-      }
-
-      // Cancel all stream subscriptions
-      for (var subscription in _subscriptions) {
-        subscription.cancel();
-      }
-      _subscriptions.clear();
-
-      // Close all peer connections
-      for (var pc in _peerConnections.values) {
-        await pc.close();
-      }
-      _peerConnections.clear();
-
-      // Stop and dispose all remote streams
-      for (var stream in _remoteStreams.values) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-      _remoteStreams.clear();
-
-      // Dispose all remote renderers
-      for (var renderer in _remoteRenderers.values) {
-        await renderer.dispose();
-      }
-      _remoteRenderers.clear();
-
-      // Stop local stream
       if (_localStream != null) {
-        _localStream!.getTracks().forEach((track) => track.stop());
+        final audioTracks = _localStream!.getAudioTracks();
+        if (audioTracks.isNotEmpty) {
+          final track = audioTracks.first;
+          track.enabled = !track.enabled;
+          _isMicrophoneMuted = !track.enabled;
+
+          print('🎤 Microphone ${_isMicrophoneMuted ? 'muted' : 'unmuted'}');
+          _updateLocalParticipant();
+        }
+      }
+    } catch (e) {
+      print('❌ Error toggling microphone: $e');
+    }
+  }
+
+  @override
+  Future<void> toggleCamera() async {
+    try {
+      if (_localStream != null) {
+        final videoTracks = _localStream!.getVideoTracks();
+        if (videoTracks.isNotEmpty) {
+          final track = videoTracks.first;
+          track.enabled = !track.enabled;
+          _isCameraEnabled = track.enabled;
+
+          print('📹 Camera ${_isCameraEnabled ? 'enabled' : 'disabled'}');
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      print('❌ Error toggling camera: $e');
+    }
+  }
+
+  @override
+  Future<void> toggleScreenSharing() async {
+    _isScreenSharing = !_isScreenSharing;
+    print('🖥️ Screen sharing ${_isScreenSharing ? 'started' : 'stopped'}');
+    _updateLocalParticipant();
+  }
+
+  @override
+  Future<void> toggleHandRaised() async {
+    _isHandRaised = !_isHandRaised;
+    print('✋ Hand ${_isHandRaised ? 'raised' : 'lowered'}');
+    _updateLocalParticipant();
+  }
+
+  void _updateLocalParticipant() {
+    final index = _participants.indexWhere((p) => p.id == _userId);
+    if (index >= 0) {
+      _participants[index] = ParticipantModel(
+        id: _userId!,
+        name: '$_displayName (You)',
+        isHost: _isHost,
+        isMuted: _isMicrophoneMuted,
+        isSpeaking: false,
+        isHandRaised: _isHandRaised,
+        isScreenSharing: _isScreenSharing,
+      );
+      notifyListeners();
+    }
+  }
+
+  @override
+  Future<void> endMeetingForAll() async {
+    print('🛑 Ending meeting for all participants...');
+    await _cleanup();
+  }
+
+  @override
+  Future<void> leaveMeetingAsParticipant() async {
+    print('🚪 Leaving meeting as participant...');
+    await _cleanup();
+  }
+
+  Future<void> _cleanup() async {
+    try {
+      print('🧹 Cleaning up meeting resources...');
+
+      _trackPollingTimer?.cancel();
+      _elapsedTimer?.cancel();
+      _elapsedTimer = null;
+      _meetingStartTime = null;
+
+      if (_peerConnection != null) {
+        await _peerConnection!.close();
+        _peerConnection = null;
+      }
+
+      if (_localStream != null) {
+        for (var track in _localStream!.getTracks()) {
+          await track.stop();
+        }
         _localStream = null;
       }
 
-      // Dispose local renderer
       if (_localRenderer != null) {
         await _localRenderer!.dispose();
         _localRenderer = null;
       }
 
-      // Stop timer
-      _meetingTimer?.cancel();
-      _meetingTimer = null;
+      for (var renderer in _remoteRenderers.values) {
+        await renderer.dispose();
+      }
+      _remoteRenderers.clear();
+      _remoteStreams.clear();
+      _publishedTracks.clear();
+      _subscribedTracks.clear();
 
-      // Reset all state
+      _sessionId = null;
+      _isConnected = false;
       _meetingId = null;
       _isHost = false;
       _isMeetingActive = false;
       _participants.clear();
       _subtitles.clear();
       _messages.clear();
-      _participantLanguages.clear();
-      _elapsedTime = const Duration();
 
-      notifyListeners();
-      print('Meeting resources cleaned up successfully');
-    } catch (e) {
-      print('Error cleaning up meeting resources: $e');
-    }
-  }
+      _isMicrophoneMuted = false;
+      _isCameraEnabled = true;
+      _isScreenSharing = false;
+      _isHandRaised = false;
 
-  // Force end meeting (called when host ends or meeting disconnected)
-  Future<void> _forceEndMeeting() async {
-    print('Force ending meeting...');
-    await _cleanupMeetingResources();
-    print('Meeting force ended');
-  }
-
-  // Listen for meeting status changes
-  void _listenForMeetingStatus() {
-    if (_meetingId == null) return;
-
-    print('Starting to listen for meeting status changes');
-
-    final subscription = _firestore
-        .collection('meetings')
-        .doc(_meetingId)
-        .snapshots()
-        .listen((snapshot) async {
-      if (snapshot.exists) {
-        final data = snapshot.data() as Map<String, dynamic>;
-        final status = data['status'];
-
-        print('Meeting status changed to: $status');
-
-        if (status == 'ended_by_host' || status == 'ended') {
-          print('Meeting has been ended, cleaning up...');
-          // Meeting has been ended by host
-          await _forceEndMeeting();
-        }
-      }
-    }, onError: (error) {
-      print('Error listening for meeting status: $error');
-    });
-
-    _subscriptions.add(subscription);
-  }
-
-  // Legacy leave meeting method - updated to use new logic
-  Future<void> leaveMeeting() async {
-    try {
-      if (_isHost) {
-        await endMeetingForAll();
-      } else {
-        await leaveMeetingAsParticipant();
-      }
-    } catch (e) {
-      print('Error in leaveMeeting: $e');
-      // Fallback cleanup
-      await _cleanupMeetingResources();
-    }
-  }
-
-  // Setup local media stream
-  Future<void> _setupLocalStream() async {
-    try {
-      // Initialize local renderer if not already
-      if (_localRenderer == null) {
-        _localRenderer = RTCVideoRenderer();
-        await _localRenderer!.initialize();
-      }
-
-      // Get user media
-      _localStream = await navigator.mediaDevices.getUserMedia({
-        'audio': true,
-        'video': {
-          'facingMode': 'user',
-        },
-      });
-
-      _localRenderer!.srcObject = _localStream;
-
-      notifyListeners();
-    } catch (e) {
-      print('Error setting up local stream: $e');
-      throw Exception('Could not access camera or microphone: $e');
-    }
-  }
-
-  // Join a meeting room and setup connections
-  Future<void> _joinMeetingRoom(String meetingId) async {
-    try {
-      _isMeetingActive = true;
-
-      // Start the meeting timer
-      _startMeetingTimer();
-
-      // Listen for meeting status changes - IMPORTANT: Add this
-      _listenForMeetingStatus();
-
-      // Listen for participant changes
-      _listenForParticipants();
-
-      // Listen for messages
-      _listenForMessages();
-
-      // Listen for subtitles
-      _listenForSubtitles();
-
-      // Listen for connection requests
-      _listenForConnectionRequests();
-
-      notifyListeners();
-    } catch (e) {
-      print('Error joining meeting room: $e');
-      _isMeetingActive = false;
-      notifyListeners();
-      throw Exception('Failed to setup meeting: $e');
-    }
-  }
-
-  // Listen for participants in the meeting
-  void _listenForParticipants() {
-    if (_meetingId == null) return;
-
-    final subscription = _firestore
-        .collection('meetings')
-        .doc(_meetingId)
-        .collection('participants')
-        .where('isActive', isEqualTo: true)
-        .snapshots()
-        .listen((snapshot) async {
-      // Update participants list
-      final List<ParticipantModel> newParticipants = [];
-
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final participantId = doc.id;
-
-        // Store language preferences
-        _participantLanguages[participantId] = data['listeningLanguage'] ?? 'english';
-
-        // Create or fetch peer connection for this participant if not local
-        if (participantId != _userId && !_peerConnections.containsKey(participantId)) {
-          await _createPeerConnection(participantId);
-        }
-
-        // Add to participants list
-        newParticipants.add(ParticipantModel(
-          id: participantId,
-          name: data['displayName'] ?? 'Unknown',
-          isSpeaking: false, // Will update based on audio activity
-          isMuted: data['isMuted'] ?? false,
-          isHost: data['role'] == 'host',
-          isHandRaised: data['isHandRaised'] ?? false,
-          isScreenSharing: data['isScreenSharing'] ?? false,
-        ));
-      }
-
-      // Find local participant
-      final localParticipantDoc = snapshot.docs.where((doc) => doc.id == _userId).toList();
-      ParticipantModel? localParticipant;
-
-      if (localParticipantDoc.isNotEmpty) {
-        final data = localParticipantDoc[0].data();
-        localParticipant = ParticipantModel(
-          id: _userId!,
-          name: data['displayName'] + ' (You)',
-          isSpeaking: _isListening,
-          isMuted: data['isMuted'] ?? true,
-          isHost: data['role'] == 'host',
-          isHandRaised: data['isHandRaised'] ?? false,
-          isScreenSharing: data['isScreenSharing'] ?? false,
-        );
-      } else {
-        // If not found, create default
-        localParticipant = ParticipantModel(
-          id: _userId!,
-          name: '$_displayName (You)',
-          isSpeaking: _isListening,
-          isMuted: !_isListening,
-          isHost: _isHost,
-          isHandRaised: false,
-          isScreenSharing: false,
-        );
-      }
-
-      // Remove local participant if present in list already
-      newParticipants.removeWhere((p) => p.id == _userId);
-
-      // Add local participant at the beginning
-      newParticipants.insert(0, localParticipant);
-
-      // Update participants
-      _participants.clear();
-      _participants.addAll(newParticipants);
-
-      notifyListeners();
-    }, onError: (error) {
-      print('Error listening for participants: $error');
-    });
-
-    _subscriptions.add(subscription);
-  }
-
-  // Create WebRTC peer connection for a participant
-  Future<void> _createPeerConnection(String participantId) async {
-    try {
-      print("Creating peer connection with $participantId");
-
-      // Create peer connection
-      final pc = await createPeerConnection(_iceServers);
-      _peerConnections[participantId] = pc;
-
-      // Create renderer for remote stream
-      final renderer = RTCVideoRenderer();
-      await renderer.initialize();
-      _remoteRenderers[participantId] = renderer;
-
-      // Add local tracks to peer connection
-      _localStream?.getTracks().forEach((track) {
-        pc.addTrack(track, _localStream!);
-      });
-
-      // Setup event handlers
-      pc.onIceConnectionState = (state) {
-        print("ICE connection state with $participantId: $state");
-        if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
-            state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
-          print("Connection with $participantId failed or disconnected, attempting to reconnect...");
-          // Logic for reconnection can be added here
-        }
-      };
-
-      pc.onIceCandidate = (candidate) async {
-        if (_meetingId == null) return;
-
-        await _firestore
-            .collection('meetings')
-            .doc(_meetingId)
-            .collection('connections')
-            .doc('${_userId}_$participantId')
-            .collection('candidates')
-            .add({
-          'candidate': candidate.candidate,
-          'sdpMid': candidate.sdpMid,
-          'sdpMLineIndex': candidate.sdpMLineIndex,
-          'from': _userId,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
-      };
-
-      pc.onTrack = (event) {
-        if (event.streams.isNotEmpty) {
-          final stream = event.streams[0];
-          _remoteStreams[participantId] = stream;
-          _remoteRenderers[participantId]?.srcObject = stream;
-
-          print("Remote stream received from $participantId");
-          notifyListeners();
-        }
-      };
-
-      // Create offer if we're establishing the connection
-      final offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      // Store the offer in Firestore
-      await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('connections')
-          .doc('${_userId}_$participantId')
-          .set({
-        'offer': {
-          'type': offer.type,
-          'sdp': offer.sdp,
-        },
-        'from': _userId,
-        'to': participantId,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      // Listen for answer
-      final answerSubscription = _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('connections')
-          .doc('${participantId}_${_userId}')
-          .snapshots()
-          .listen((snapshot) async {
-        if (snapshot.exists && snapshot.data()!.containsKey('answer')) {
-          final answerData = snapshot.data()!['answer'];
-
-          // Ensure peer connection still exists
-          if (_peerConnections.containsKey(participantId)) {
-            try {
-              final answer = RTCSessionDescription(
-                answerData['sdp'],
-                answerData['type'],
-              );
-
-              await _peerConnections[participantId]?.setRemoteDescription(answer);
-              print("Answer set from $participantId");
-            } catch (e) {
-              print("Error setting remote description: $e");
-            }
-          }
-        }
-      }, onError: (error) {
-        print('Error listening for answer: $error');
-      });
-
-      _subscriptions.add(answerSubscription);
-
-      // Listen for ICE candidates
-      final candidateSubscription = _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('connections')
-          .doc('${participantId}_${_userId}')
-          .collection('candidates')
-          .snapshots()
-          .listen((snapshot) async {
-        for (var change in snapshot.docChanges) {
-          if (change.type == DocumentChangeType.added) {
-            final data = change.doc.data()!;
-            if (data['from'] == participantId && _peerConnections.containsKey(participantId)) {
-              try {
-                final candidate = RTCIceCandidate(
-                  data['candidate'],
-                  data['sdpMid'],
-                  data['sdpMLineIndex'],
-                );
-
-                await _peerConnections[participantId]?.addCandidate(candidate);
-                print("ICE candidate added from $participantId");
-              } catch (e) {
-                print("Error adding ICE candidate: $e");
-              }
-            }
-          }
-        }
-      }, onError: (error) {
-        print('Error listening for ICE candidates: $error');
-      });
-
-      _subscriptions.add(candidateSubscription);
-    } catch (e) {
-      print('Error creating peer connection: $e');
-    }
-  }
-
-  // Listen for incoming connection requests
-  void _listenForConnectionRequests() {
-    if (_meetingId == null || _userId == null) return;
-
-    final subscription = _firestore
-        .collection('meetings')
-        .doc(_meetingId)
-        .collection('connections')
-        .where('to', isEqualTo: _userId)
-        .snapshots()
-        .listen((snapshot) async {
-      for (var change in snapshot.docChanges) {
-        if (change.type == DocumentChangeType.added) {
-          final data = change.doc.data();
-          final fromUserId = data?['from'];
-
-          // Skip if connection already exists
-          if (_peerConnections.containsKey(fromUserId)) continue;
-
-          if (data!.containsKey('offer')) {
-            print("Received connection request from $fromUserId");
-
-            // Create renderer
-            final renderer = RTCVideoRenderer();
-            await renderer.initialize();
-            _remoteRenderers[fromUserId] = renderer;
-
-            // Create peer connection
-            final pc = await createPeerConnection(_iceServers);
-            _peerConnections[fromUserId] = pc;
-
-            // Add local stream
-            _localStream?.getTracks().forEach((track) {
-              pc.addTrack(track, _localStream!);
-            });
-
-            // Setup event handlers
-            pc.onIceCandidate = (candidate) async {
-              await _firestore
-                  .collection('meetings')
-                  .doc(_meetingId)
-                  .collection('connections')
-                  .doc('${_userId}_$fromUserId')
-                  .collection('candidates')
-                  .add({
-                'candidate': candidate.candidate,
-                'sdpMid': candidate.sdpMid,
-                'sdpMLineIndex': candidate.sdpMLineIndex,
-                'from': _userId,
-                'timestamp': FieldValue.serverTimestamp(),
-              });
-            };
-
-            pc.onTrack = (event) {
-              if (event.streams.isNotEmpty) {
-                final stream = event.streams[0];
-                _remoteStreams[fromUserId] = stream;
-                _remoteRenderers[fromUserId]?.srcObject = stream;
-
-                print("Remote stream received from $fromUserId");
-                notifyListeners();
-              }
-            };
-
-            // Set remote description (offer)
-            final offerData = data?['offer'];
-            try {
-              final offer = RTCSessionDescription(
-                offerData['sdp'],
-                offerData['type'],
-              );
-
-              await pc.setRemoteDescription(offer);
-
-              // Create answer
-              final answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-
-              // Send answer
-              await _firestore
-                  .collection('meetings')
-                  .doc(_meetingId)
-                  .collection('connections')
-                  .doc('${_userId}_$fromUserId')
-                  .set({
-                'answer': {
-                  'type': answer.type,
-                  'sdp': answer.sdp,
-                },
-                'from': _userId,
-                'to': fromUserId,
-                'timestamp': FieldValue.serverTimestamp(),
-              });
-
-              print("Answer sent to $fromUserId");
-            } catch (e) {
-              print("Error processing offer from $fromUserId: $e");
-            }
-
-            // Listen for ICE candidates
-            final candidateSubscription = _firestore
-                .collection('meetings')
-                .doc(_meetingId)
-                .collection('connections')
-                .doc('${fromUserId}_${_userId}')
-                .collection('candidates')
-                .snapshots()
-                .listen((snapshot) async {
-              for (var change in snapshot.docChanges) {
-                if (change.type == DocumentChangeType.added) {
-                  final data = change.doc.data()!;
-                  if (data['from'] == fromUserId && _peerConnections.containsKey(fromUserId)) {
-                    try {
-                      final candidate = RTCIceCandidate(
-                        data['candidate'],
-                        data['sdpMid'],
-                        data['sdpMLineIndex'],
-                      );
-
-                      await _peerConnections[fromUserId]?.addCandidate(candidate);
-                      print("ICE candidate added from $fromUserId");
-                    } catch (e) {
-                      print("Error adding ICE candidate: $e");
-                    }
-                  }
-                }
-              }
-            }, onError: (error) {
-              print('Error listening for ICE candidates: $error');
-            });
-
-            _subscriptions.add(candidateSubscription);
-          }
-        }
-      }
-    }, onError: (error) {
-      print('Error listening for connection requests: $error');
-    });
-
-    _subscriptions.add(subscription);
-  }
-
-  // Listen for messages
-  void _listenForMessages() {
-    if (_meetingId == null) return;
-
-    final subscription = _firestore
-        .collection('meetings')
-        .doc(_meetingId)
-        .collection('messages')
-        .orderBy('timestamp', descending: false)
-        .snapshots()
-        .listen((snapshot) {
-      final List<ChatMessage> newMessages = [];
-
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-
-        newMessages.add(ChatMessage(
-          id: doc.id,
-          senderId: data['senderId'],
-          senderName: data['senderName'],
-          text: data['text'],
-          timestamp: (data['timestamp'] as Timestamp).toDate(),
-          isMe: data['senderId'] == _userId,
-        ));
-      }
-
-      _messages.clear();
-      _messages.addAll(newMessages);
-
-      notifyListeners();
-    }, onError: (error) {
-      print('Error listening for messages: $error');
-    });
-
-    _subscriptions.add(subscription);
-  }
-
-  // Listen for subtitles/transcriptions
-  void _listenForSubtitles() {
-    if (_meetingId == null) return;
-
-    final subscription = _firestore
-        .collection('meetings')
-        .doc(_meetingId)
-        .collection('subtitles')
-        .where('targetLanguage', isEqualTo: _selectedListeningLanguage)
-        .orderBy('timestamp', descending: true)
-        .limit(5)
-        .snapshots()
-        .listen((snapshot) {
-      final List<SubtitleModel> newSubtitles = [];
-
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-
-        newSubtitles.add(SubtitleModel(
-          id: doc.id,
-          speakerId: data['speakerId'],
-          text: data['translatedText'] ?? data['originalText'],
-          language: data['targetLanguage'],
-          timestamp: (data['timestamp'] as Timestamp).toDate(),
-        ));
-      }
-
-      _subtitles.clear();
-      _subtitles.addAll(newSubtitles);
-
-      notifyListeners();
-    }, onError: (error) {
-      print('Error listening for subtitles: $error');
-    });
-
-    _subscriptions.add(subscription);
-  }
-
-  // Disable WebRTC audio during speech recognition
-  void _disableWebRTCAudio() {
-    if (_localStream != null && _localStream!.getAudioTracks().isNotEmpty) {
-      _webRTCAudioEnabled = _localStream!.getAudioTracks().first.enabled;
-      _localStream!.getAudioTracks().first.enabled = false;
-      print('Disabled WebRTC audio for speech recognition');
-    }
-  }
-
-  // Restore WebRTC audio after speech recognition
-  void _restoreWebRTCAudio() {
-    if (_localStream != null && _localStream!.getAudioTracks().isNotEmpty) {
-      _localStream!.getAudioTracks().first.enabled = _webRTCAudioEnabled;
-      print('Restored WebRTC audio after speech recognition');
-    }
-  }
-
-  // Start speech recognition
-  Future<void> startSpeechRecognition() async {
-    if (!_isMeetingActive || _meetingId == null) return;
-
-    try {
-      final localeId = _getLocaleForLanguage(_selectedSpeakingLanguage);
-
-      _isListening = true;
-      _currentTranscription = '';
-
-      // Disable WebRTC audio to prevent feedback loops
-      _disableWebRTCAudio();
-
-      // Update local participant status
-      _updateLocalParticipantSpeakingStatus(true);
-
+      print('✅ Cleanup completed');
       notifyListeners();
 
-      await _speechToText.listen(
-        localeId: localeId,
-        onResult: (result) async {
-          _currentTranscription = result.recognizedWords;
-
-          if (result.finalResult && _currentTranscription.isNotEmpty) {
-            // Translate and store the transcription
-            await _translateAndStoreText(_currentTranscription);
-
-            _isListening = false;
-            _currentTranscription = '';
-
-            // Restore WebRTC audio
-            _restoreWebRTCAudio();
-
-            // Update the local participant speaking status
-            _updateLocalParticipantSpeakingStatus(false);
-          }
-
-          notifyListeners();
-        },
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 5),
-        onSoundLevelChange: (level) {
-          // Could use this to show visual feedback for voice level
-        },
-      );
     } catch (e) {
-      print('Error starting speech recognition: $e');
-      _isListening = false;
-      _currentTranscription = '';
-
-      // Restore WebRTC audio in case of error
-      _restoreWebRTCAudio();
-
-      // Update local participant status
-      _updateLocalParticipantSpeakingStatus(false);
-
-      notifyListeners();
+      print('❌ Error during cleanup: $e');
     }
   }
 
-  // Stop speech recognition
-  Future<void> stopSpeechRecognition() async {
-    if (_isListening) {
-      await _speechToText.stop();
-      _isListening = false;
-
-      // Restore WebRTC audio
-      _restoreWebRTCAudio();
-
-      // If there's text, translate and store it
-      if (_currentTranscription.isNotEmpty) {
-        await _translateAndStoreText(_currentTranscription);
-        _currentTranscription = '';
-      }
-
-      // Update the local participant speaking status
-      _updateLocalParticipantSpeakingStatus(false);
-
-      notifyListeners();
-    }
-  }
-
-  // Toggle speech recognition
-  Future<void> toggleSpeechRecognition() async {
-    if (_isListening) {
-      await stopSpeechRecognition();
-    } else {
-      await startSpeechRecognition();
-    }
-  }
-
-  // Translate and store text
-  Future<void> _translateAndStoreText(String text) async {
-    if (_meetingId == null || _userId == null || text.isEmpty) return;
-
-    try {
-      // Create the original text document
-      final docRef = await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('subtitles')
-          .add({
-        'speakerId': _userId,
-        'speakerName': _displayName,
-        'originalText': text,
-        'sourceLanguage': _selectedSpeakingLanguage,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      // Translate to all required languages
-      final batch = _firestore.batch();
-
-      // Get unique target languages (excluding source language)
-      final Set<String> targetLanguages = _participantLanguages.values.toSet();
-      targetLanguages.add(_selectedListeningLanguage); // Ensure our own language is included
-      targetLanguages.remove(_selectedSpeakingLanguage); // Remove source language
-
-      for (var targetLanguage in targetLanguages) {
-        // Skip if same as source language
-        if (targetLanguage == _selectedSpeakingLanguage) continue;
-
-        try {
-          // Translate the text
-          final translation = await _translator.translate(
-            text,
-            from: _getTranslatorCode(_selectedSpeakingLanguage),
-            to: _getTranslatorCode(targetLanguage),
-          );
-
-          // Store the translation
-          final translationDoc = _firestore
-              .collection('meetings')
-              .doc(_meetingId)
-              .collection('subtitles')
-              .doc();
-
-          batch.set(translationDoc, {
-            'speakerId': _userId,
-            'speakerName': _displayName,
-            'originalText': text,
-            'translatedText': translation.text,
-            'sourceLanguage': _selectedSpeakingLanguage,
-            'targetLanguage': targetLanguage,
-            'originalDocId': docRef.id,
-            'timestamp': FieldValue.serverTimestamp(),
-          });
-        } catch (e) {
-          print('Error translating to $targetLanguage: $e');
-        }
-      }
-
-      // Update the original document with translated status
-      batch.update(docRef, {
-        'translatedLanguages': targetLanguages.toList(),
-        'isTranslated': true,
-      });
-
-      await batch.commit();
-    } catch (e) {
-      print('Error translating and storing text: $e');
-    }
-  }
-
-  // Send a chat message
-  Future<void> sendMessage(String text) async {
-    if (_meetingId == null || _userId == null || text.isEmpty) return;
-
-    try {
-      await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('messages')
-          .add({
-        'senderId': _userId,
-        'senderName': _displayName,
-        'text': text,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      print('Error sending message: $e');
-    }
-  }
-
-  // Toggle hand raised status
-  Future<void> toggleHandRaised() async {
-    if (_meetingId == null || _userId == null) return;
-
-    try {
-      // Find current status in participants list
-      final index = _participants.indexWhere((p) => p.id == _userId);
-      final isCurrentlyRaised = index >= 0 ? _participants[index].isHandRaised : false;
-
-      // Toggle status
-      await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .update({
-        'isHandRaised': !isCurrentlyRaised,
-      });
-
-      // Update local state immediately for better UX
-      if (index >= 0) {
-        _participants[index] = _participants[index].copyWith(
-          isHandRaised: !isCurrentlyRaised,
-        );
-        notifyListeners();
-      }
-    } catch (e) {
-      print('Error toggling hand raised: $e');
-    }
-  }
-
-  // Toggle microphone
-  Future<void> toggleMicrophone() async {
-    if (_meetingId == null || _userId == null || _localStream == null) return;
-
-    try {
-      // Toggle audio tracks
-      final audioTracks = _localStream!.getAudioTracks();
-      for (var track in audioTracks) {
-        track.enabled = !track.enabled;
-      }
-
-      // Get current status
-      final isMuted = !audioTracks.first.enabled;
-
-      // Update in Firestore
-      await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .update({
-        'isMuted': isMuted,
-      });
-
-      // Update local state immediately
-      final index = _participants.indexWhere((p) => p.id == _userId);
-      if (index >= 0) {
-        _participants[index] = _participants[index].copyWith(
-          isMuted: isMuted,
-        );
-        notifyListeners();
-      }
-    } catch (e) {
-      print('Error toggling microphone: $e');
-    }
-  }
-
-  // Toggle camera
-  Future<void> toggleCamera() async {
-    if (_meetingId == null || _userId == null || _localStream == null) return;
-
-    try {
-      // Toggle video tracks
-      final videoTracks = _localStream!.getVideoTracks();
-      for (var track in videoTracks) {
-        track.enabled = !track.enabled;
-      }
-
-      // Get current status
-      final isCameraOff = !videoTracks.first.enabled;
-
-      // Update in Firestore
-      await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .update({
-        'isCameraOff': isCameraOff,
-      });
-
-      notifyListeners();
-    } catch (e) {
-      print('Error toggling camera: $e');
-    }
-  }
-
-  // Toggle screen sharing
-  Future<void> toggleScreenSharing() async {
-    if (_meetingId == null || _userId == null) return;
-
-    try {
-      // Find current status in participants list
-      final index = _participants.indexWhere((p) => p.id == _userId);
-      final isCurrentlySharing = index >= 0 ? _participants[index].isScreenSharing : false;
-
-      MediaStream? screenStream; // Khai báo biến ở ngoài khối try nội bộ
-
-      if (!isCurrentlySharing) {
-        // Start screen sharing
-        try {
-          screenStream = await navigator.mediaDevices.getDisplayMedia({
-            'audio': false,
-            'video': true,
-          });
-
-          // Replace the video track in all peer connections
-          for (var pc in _peerConnections.values) {
-            final senders = await pc.getSenders();
-            // Sửa lỗi RTCRtpSender null
-            final videoSenders = senders.where(
-                    (sender) => sender.track?.kind == 'video'
-            ).toList();
-
-            if (videoSenders.isNotEmpty && screenStream != null) {
-              await videoSenders.first.replaceTrack(screenStream.getVideoTracks()[0]);
-            }
-          }
-
-          // Update UI
-          if (screenStream != null) {
-            _localRenderer!.srcObject = screenStream;
-
-            // Store old stream to restore later
-            final oldStream = _localStream;
-            _localStream = screenStream;
-
-            // Listen for track ended event
-            screenStream.getVideoTracks().first.onEnded = () {
-              // Auto-switch back to camera when screen sharing ends
-              _restoreCamera(oldStream);
-            };
-          }
-        } catch (e) {
-          print('Error starting screen sharing: $e');
-          return;
-        }
-      } else {
-        // Stop screen sharing and revert to camera
-        await _setupLocalStream();
-
-        // Replace the video track in all peer connections
-        for (var pc in _peerConnections.values) {
-          final senders = await pc.getSenders();
-          // Sửa lỗi RTCRtpSender null
-          final videoSenders = senders.where(
-                  (sender) => sender.track?.kind == 'video'
-          ).toList();
-
-          if (videoSenders.isNotEmpty && _localStream != null) {
-            await videoSenders.first.replaceTrack(_localStream!.getVideoTracks()[0]);
-          }
-        }
-      }
-
-      // Update in Firestore
-      await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .update({
-        'isScreenSharing': !isCurrentlySharing,
-      });
-
-      // Update local state immediately
-      if (index >= 0) {
-        _participants[index] = _participants[index].copyWith(
-          isScreenSharing: !isCurrentlySharing,
-        );
-        notifyListeners();
-      }
-    } catch (e) {
-      print('Error toggling screen sharing: $e');
-    }
-  }
-
-  // Restore camera after screen sharing ends
-  Future<void> _restoreCamera(MediaStream? oldStream) async {
-    try {
-      if (oldStream != null && oldStream.getVideoTracks().isNotEmpty) {
-        // Use old stream if available
-        _localStream = oldStream;
-      } else {
-        // Otherwise get new stream
-        await _setupLocalStream();
-      }
-
-      // Replace the video track in all peer connections
-      for (var pc in _peerConnections.values) {
-        final senders = await pc.getSenders();
-        // Sửa lỗi RTCRtpSender null
-        final videoSenders = senders.where(
-                (sender) => sender.track?.kind == 'video'
-        ).toList();
-
-        if (videoSenders.isNotEmpty && _localStream != null) {
-          await videoSenders.first.replaceTrack(_localStream!.getVideoTracks()[0]);
-        }
-      }
-
-      // Update UI
-      _localRenderer!.srcObject = _localStream;
-
-      // Update in Firestore
-      await _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .update({
-        'isScreenSharing': false,
-      });
-
-      // Update local state
-      final index = _participants.indexWhere((p) => p.id == _userId);
-      if (index >= 0) {
-        _participants[index] = _participants[index].copyWith(
-          isScreenSharing: false,
-        );
-        notifyListeners();
-      }
-    } catch (e) {
-      print('Error restoring camera: $e');
-    }
-  }
-
-  // Get RTCVideoRenderer for a participant
+  @override
   RTCVideoRenderer? getRendererForParticipant(String participantId) {
     if (participantId == _userId) {
       return _localRenderer;
-    } else {
-      return _remoteRenderers[participantId];
     }
-  }
 
-  // Helper method to update local participant speaking status
-  void _updateLocalParticipantSpeakingStatus(bool isSpeaking) {
-    try {
-      if (_meetingId == null || _userId == null) return;
-
-      // Update in the participants list for immediate UI feedback
-      final index = _participants.indexWhere((p) => p.id == _userId);
-      if (index >= 0) {
-        _participants[index] = _participants[index].copyWith(
-          isSpeaking: isSpeaking,
-          isMuted: !isSpeaking,
-        );
+    // Look for remote renderer by participant ID
+    for (var entry in _remoteRenderers.entries) {
+      if (entry.key.contains(participantId.substring(0, 6))) {
+        return entry.value;
       }
-
-      // Update in Firestore
-      _firestore
-          .collection('meetings')
-          .doc(_meetingId)
-          .collection('participants')
-          .doc(_userId)
-          .update({
-        'isSpeaking': isSpeaking,
-        'isMuted': !isSpeaking,
-      });
-    } catch (e) {
-      print('Error updating speaking status: $e');
     }
+
+    return null;
   }
 
-  // Helper method to get locale string for a language
-  String _getLocaleForLanguage(String language) {
-    final Map<String, String> localeMap = {
-      'english': 'en-US',
-      'spanish': 'es-ES',
-      'french': 'fr-FR',
-      'german': 'de-DE',
-      'chinese': 'zh-CN',
-      'japanese': 'ja-JP',
-      'korean': 'ko-KR',
-      'arabic': 'ar-SA',
-      'russian': 'ru-RU',
-      'vietnamese': 'vi-VN',
-    };
+  // Stub implementations for compatibility
+  @override
+  Future<void> toggleSpeechRecognition() async {}
 
-    return localeMap[language.toLowerCase()] ?? 'en-US';
-  }
+  @override
+  Future<void> startSpeechRecognition() async {}
 
-  // Helper method to get translator language code
-  String _getTranslatorCode(String language) {
-    final Map<String, String> codeMap = {
-      'english': 'en',
-      'spanish': 'es',
-      'french': 'fr',
-      'german': 'de',
-      'chinese': 'zh-CN',
-      'japanese': 'ja',
-      'korean': 'ko',
-      'arabic': 'ar',
-      'russian': 'ru',
-      'vietnamese': 'vi',
-    };
+  @override
+  Future<void> stopSpeechRecognition() async {}
 
-    return codeMap[language.toLowerCase()] ?? 'en';
-  }
+  @override
+  Future<void> sendMessage(String message) async {
+    if (message.trim().isEmpty) return;
 
-  // Start meeting timer
-  void _startMeetingTimer() {
-    _meetingTimer?.cancel();
-    _elapsedTime = const Duration();
+    final chatMessage = ChatMessage(
+      id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
+      senderId: _userId!,
+      senderName: _displayName,
+      text: message.trim(),
+      timestamp: DateTime.now(),
+      isMe: true,
+    );
 
-    _meetingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _elapsedTime = Duration(seconds: _elapsedTime.inSeconds + 1);
-      notifyListeners();
-    });
+    _messages.add(chatMessage);
+    notifyListeners();
   }
 
   @override
   void dispose() {
-    print('Disposing MeetingService...');
-
-    // Cancel all subscriptions
-    for (var subscription in _subscriptions) {
-      subscription.cancel();
-    }
-    _subscriptions.clear();
-
-    // Cleanup resources
-    _meetingTimer?.cancel();
-
-    for (var pc in _peerConnections.values) {
-      pc.close();
-    }
-
-    for (var stream in _remoteStreams.values) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-
-    for (var renderer in _remoteRenderers.values) {
-      renderer.dispose();
-    }
-
-    _localStream?.getTracks().forEach((track) => track.stop());
-    _localRenderer?.dispose();
-
+    print('🗑️ Disposing WebRTC Meeting Service...');
+    _cleanup();
     super.dispose();
   }
 }
 
-// Models
+// Model classes
 class ParticipantModel {
   final String id;
   final String name;

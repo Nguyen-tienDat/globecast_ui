@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:globecast_ui/firebase_options.dart';
 import 'package:globecast_ui/router/app_router.dart';
 import 'package:globecast_ui/services/auth_service.dart';
-import 'package:globecast_ui/services/meeting_service.dart';
+import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 
@@ -27,9 +27,9 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  final _appRouter = GcbAppRouter();
   final AuthService _authService = AuthService();
-  final GcbMeetingService _meetingService = GcbMeetingService();
+  final WebRTCMeshMeetingService _webrtcService = WebRTCMeshMeetingService();
+  final Routes _routes = Routes();
 
   @override
   void initState() {
@@ -38,7 +38,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _initializeServices() async {
-    await _meetingService.initialize();
+    await _webrtcService.initialize();
   }
 
   @override
@@ -46,15 +46,16 @@ class _MyAppState extends State<MyApp> {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: _authService),
-        ChangeNotifierProvider.value(value: _meetingService),
+        ChangeNotifierProvider.value(value: _webrtcService),
       ],
       child: Consumer<AuthService>(
         builder: (context, authService, child) {
-          return MaterialApp.router(
+          return MaterialApp(
             title: 'GlobeCast',
             theme: GcbAppTheme.darkTheme,
             debugShowCheckedModeBanner: false,
-            routerConfig: _appRouter.config(),
+            initialRoute: Routes.welcome,
+            routes: _routes.routes,
           );
         },
       ),
@@ -64,7 +65,7 @@ class _MyAppState extends State<MyApp> {
   @override
   void dispose() {
     _authService.dispose();
-    _meetingService.dispose();
+    _webrtcService.dispose();
     super.dispose();
   }
 }

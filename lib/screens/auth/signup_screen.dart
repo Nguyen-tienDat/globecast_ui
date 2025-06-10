@@ -1,12 +1,10 @@
 // lib/screens/auth/signup_screen.dart
-import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
-import 'package:globecast_ui/router/app_router.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
+import '../../router/app_router.dart';
 import '../../services/auth_service.dart';
 
-@RoutePage()
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
 
@@ -50,8 +48,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
 
       if (mounted) {
-        // Navigate to home screen
-        context.router.replaceAll([const HomeRoute()]);
+        Navigator.pushReplacementNamed(context, Routes.home);
       }
     } catch (e) {
       if (mounted) {
@@ -80,7 +77,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => context.router.pop(),
+          onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'Sign Up',
@@ -112,7 +109,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 const SizedBox(height: 8),
 
                 Text(
-                  'Join GlobeCast and connect globally',
+                  'Join GlobeCast WebRTC mesh network',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: Colors.grey[400],
                   ),
@@ -349,7 +346,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     ),
                     TextButton(
                       onPressed: () {
-                        context.router.push(const SignInRoute());
+                        Navigator.pushNamed(context, Routes.signIn);
                       },
                       child: const Text(
                         'Sign In',

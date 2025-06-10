@@ -1,10 +1,9 @@
 // lib/screens/auth/welcome_screen.dart
-import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
-import 'package:globecast_ui/router/app_router.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 
-@RoutePage()
+import '../../router/app_router.dart';
+
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
 
@@ -50,11 +49,11 @@ class WelcomeScreen extends StatelessWidget {
 
               // Subtitle
               Text(
-                'Workplace',
+                'WebRTC Mesh Meetings',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w300,
-                  fontSize: 32,
+                  fontSize: 24,
                 ),
               ),
 
@@ -81,7 +80,7 @@ class WelcomeScreen extends StatelessWidget {
                     const SizedBox(height: 8),
 
                     Text(
-                      'Get started with your account',
+                      'Start your mesh video conference',
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: Colors.grey[600],
                       ),
@@ -95,7 +94,7 @@ class WelcomeScreen extends StatelessWidget {
                       height: 50,
                       child: ElevatedButton(
                         onPressed: () {
-                          context.router.push(const JoinMeetingRoute());
+                          Navigator.pushNamed(context, Routes.joinMeeting);
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
@@ -119,7 +118,7 @@ class WelcomeScreen extends StatelessWidget {
                     // Sign up button
                     TextButton(
                       onPressed: () {
-                        context.router.push(const SignUpRoute());
+                        Navigator.pushNamed(context, Routes.signUp);
                       },
                       child: Text(
                         'Sign up',
@@ -136,7 +135,7 @@ class WelcomeScreen extends StatelessWidget {
                     // Sign in button
                     TextButton(
                       onPressed: () {
-                        context.router.push(const SignInRoute());
+                        Navigator.pushNamed(context, Routes.signIn);
                       },
                       child: Text(
                         'Sign in',
