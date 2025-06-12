@@ -14,11 +14,16 @@ class CreateMeetingScreen extends StatefulWidget {
 
 class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
   final _topicController = TextEditingController();
+  String _selectedDuration = '60 min';
+  String _selectedLanguage = 'English';
+  final List<String> _selectedTranslationLanguages = ['Spanish', 'French'];
+  final _passwordController = TextEditingController();
   bool _isLoading = false;
 
   @override
   void dispose() {
     _topicController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -38,13 +43,12 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
       final webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
 
       // Set user details
-      webrtcService.setUserDetails(displayName: 'Host');
+      webrtcService.setUserDetails(displayName: 'You (Host)');
 
       // Create meeting
       final meetingId = await webrtcService.createMeeting(topic: _topicController.text.trim());
 
       if (mounted) {
-        // Navigate to meeting screen
         Navigator.pushNamed(
             context,
             Routes.meeting,
@@ -78,7 +82,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'Create WebRTC Meeting',
+          'Create Meeting',
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w500,
@@ -91,47 +95,6 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Info about mesh topology
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  border: Border.all(color: Colors.blue, width: 1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline, color: Colors.blue),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'WebRTC Mesh Meeting',
-                            style: TextStyle(
-                              color: Colors.blue,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Direct peer-to-peer connection. Maximum 6 participants for optimal performance.',
-                            style: TextStyle(
-                              color: Colors.grey[300],
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
               // Meeting Topic
               const Text(
                 'Meeting Topic',
@@ -160,49 +123,179 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                   contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
+              const SizedBox(height: 16),
 
-              const SizedBox(height: 24),
+              // Meeting Duration
+              const Text(
+                'Meeting Duration',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
 
-              // Features info
+              // Duration Dropdown
               Container(
-                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: GcbAppTheme.surface,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Mesh Meeting Features:',
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedDuration,
+                    dropdownColor: GcbAppTheme.surface,
+                    iconEnabledColor: Colors.white,
+                    style: const TextStyle(color: Colors.white),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    isExpanded: true,
+                    items: ['30 min', '60 min', '90 min', '2 hour']
+                        .map((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        setState(() {
+                          _selectedDuration = newValue;
+                        });
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Speaking Language
+              const Text(
+                'Speaking Language',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // Language Dropdown
+              Container(
+                decoration: BoxDecoration(
+                  color: GcbAppTheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedLanguage,
+                    dropdownColor: GcbAppTheme.surface,
+                    iconEnabledColor: Colors.white,
+                    style: const TextStyle(color: Colors.white),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    isExpanded: true,
+                    items: ['English', 'Spanish', 'French', 'German', 'Chinese']
+                        .map((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        setState(() {
+                          _selectedLanguage = newValue;
+                        });
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Translation Languages
+              const Text(
+                'Translation Languages',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // Selected Languages Chips
+              Wrap(
+                spacing: 8,
+                children: [
+                  ..._selectedTranslationLanguages.map((language) {
+                    return Chip(
+                      label: Text(
+                        language,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                      backgroundColor: GcbAppTheme.surface,
+                      deleteIcon: const Icon(
+                        Icons.close,
+                        size: 16,
+                        color: Colors.grey,
+                      ),
+                      onDeleted: () {
+                        setState(() {
+                          _selectedTranslationLanguages.remove(language);
+                        });
+                      },
+                    );
+                  }).toList(),
+
+                  // Add Language Button
+                  ActionChip(
+                    label: const Text(
+                      'Add Language',
                       style: TextStyle(
                         color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                        fontSize: 12,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    const _FeatureItem(
-                      icon: Icons.group,
-                      text: 'Up to 6 participants',
-                    ),
-                    const _FeatureItem(
-                      icon: Icons.video_call,
-                      text: 'Real-time video calls',
-                    ),
-                    const _FeatureItem(
-                      icon: Icons.screen_share,
-                      text: 'Screen sharing',
-                    ),
-                    const _FeatureItem(
-                      icon: Icons.chat,
-                      text: 'In-meeting chat',
-                    ),
-                    const _FeatureItem(
-                      icon: Icons.security,
-                      text: 'Secure P2P connection',
-                    ),
-                  ],
+                    backgroundColor: Colors.blue.withOpacity(0.3),
+                    onPressed: () {
+                      _showLanguageSelectionDialog();
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Password
+              const Text(
+                'Password (optional)',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // Password Input
+              TextField(
+                controller: _passwordController,
+                style: const TextStyle(color: Colors.white),
+                obscureText: true,
+                decoration: InputDecoration(
+                  hintText: 'Set meeting password',
+                  hintStyle: TextStyle(color: Colors.grey[500]),
+                  prefixIcon: const Icon(Icons.lock_outline, color: Colors.grey),
+                  filled: true,
+                  fillColor: GcbAppTheme.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
 
@@ -230,7 +323,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                     ),
                   )
                       : const Text(
-                    'Create Mesh Meeting',
+                    'Create',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -246,34 +339,50 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
       ),
     );
   }
-}
 
-class _FeatureItem extends StatelessWidget {
-  final IconData icon;
-  final String text;
-
-  const _FeatureItem({
-    required this.icon,
-    required this.text,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.blue, size: 16),
-          const SizedBox(width: 8),
-          Text(
-            text,
-            style: TextStyle(
-              color: Colors.grey[300],
-              fontSize: 12,
+  // Show language selection dialog
+  void _showLanguageSelectionDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: GcbAppTheme.surface,
+          title: const Text(
+            'Select Translation Language',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...['Spanish', 'French', 'German', 'Chinese', 'Japanese', 'Korean', 'Russian', 'Arabic']
+                    .where((language) => !_selectedTranslationLanguages.contains(language) && language != _selectedLanguage)
+                    .map((language) => ListTile(
+                  title: Text(
+                    language,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () {
+                    setState(() {
+                      _selectedTranslationLanguages.add(language);
+                    });
+                    Navigator.pop(context);
+                  },
+                )),
+              ],
             ),
           ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.blue),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -49,11 +49,11 @@ class WelcomeScreen extends StatelessWidget {
 
               // Subtitle
               Text(
-                'WebRTC Mesh Meetings',
+                'Workplace',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w300,
-                  fontSize: 24,
+                  fontSize: 32,
                 ),
               ),
 
@@ -80,7 +80,7 @@ class WelcomeScreen extends StatelessWidget {
                     const SizedBox(height: 8),
 
                     Text(
-                      'Start your mesh video conference',
+                      'Get started with your account',
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: Colors.grey[600],
                       ),

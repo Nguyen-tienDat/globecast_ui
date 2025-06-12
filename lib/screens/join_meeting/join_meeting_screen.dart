@@ -14,11 +14,13 @@ class JoinMeetingScreen extends StatefulWidget {
 
 class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
   final _meetingCodeController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _isLoading = false;
 
   @override
   void dispose() {
     _meetingCodeController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -37,7 +39,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
     try {
       final webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
 
-      // Set user details
+      // Set user details with random ID to simulate different users
       webrtcService.setUserDetails(displayName: 'Participant');
 
       // Navigate to meeting screen (joining will happen there)
@@ -73,7 +75,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'Join WebRTC Meeting',
+          'Join Meeting',
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w500,
@@ -86,47 +88,6 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Info about mesh topology
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.1),
-                  border: Border.all(color: Colors.green, width: 1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline, color: Colors.green),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Joining Mesh Meeting',
-                            style: TextStyle(
-                              color: Colors.green,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'You will connect directly to other participants via WebRTC mesh network.',
-                            style: TextStyle(
-                              color: Colors.grey[300],
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
               // Meeting Code Label
               const Text(
                 'Meeting Code',
@@ -142,11 +103,10 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
               TextField(
                 controller: _meetingCodeController,
                 style: const TextStyle(color: Colors.white),
-                textCapitalization: TextCapitalization.characters,
                 decoration: InputDecoration(
-                  hintText: 'Enter meeting code (e.g., GCM12345678)',
+                  hintText: 'Enter meeting code',
                   hintStyle: TextStyle(color: Colors.grey[500]),
-                  prefixIcon: const Icon(Icons.meeting_room, color: Colors.grey),
+                  prefixIcon: const Icon(Icons.numbers, color: Colors.grey),
                   filled: true,
                   fillColor: GcbAppTheme.surface,
                   border: OutlineInputBorder(
@@ -156,45 +116,35 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                   contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
+              const SizedBox(height: 16),
 
-              const SizedBox(height: 24),
-
-              // Connection info
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: GcbAppTheme.surface,
-                  borderRadius: BorderRadius.circular(8),
+              // Password Label
+              const Text(
+                'Password (optional)',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Connection Details:',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const _ConnectionItem(
-                      icon: Icons.speed,
-                      text: 'Low latency P2P connection',
-                    ),
-                    const _ConnectionItem(
-                      icon: Icons.security,
-                      text: 'End-to-end encrypted',
-                    ),
-                    const _ConnectionItem(
-                      icon: Icons.storage,
-                      text: 'No server recording',
-                    ),
-                    const _ConnectionItem(
-                      icon: Icons.devices,
-                      text: 'Works on all devices',
-                    ),
-                  ],
+              ),
+              const SizedBox(height: 8),
+
+              // Password Input
+              TextField(
+                controller: _passwordController,
+                style: const TextStyle(color: Colors.white),
+                obscureText: true,
+                decoration: InputDecoration(
+                  hintText: 'Enter meeting password if required',
+                  hintStyle: TextStyle(color: Colors.grey[500]),
+                  prefixIcon: const Icon(Icons.lock_outline, color: Colors.grey),
+                  filled: true,
+                  fillColor: GcbAppTheme.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
 
@@ -207,7 +157,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _joinMeeting,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
+                    backgroundColor: Colors.blue,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -222,7 +172,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                     ),
                   )
                       : const Text(
-                    'Join Mesh Meeting',
+                    'Join Now',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -235,36 +185,6 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ConnectionItem extends StatelessWidget {
-  final IconData icon;
-  final String text;
-
-  const _ConnectionItem({
-    required this.icon,
-    required this.text,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.green, size: 16),
-          const SizedBox(width: 8),
-          Text(
-            text,
-            style: TextStyle(
-              color: Colors.grey[300],
-              fontSize: 12,
-            ),
-          ),
-        ],
       ),
     );
   }

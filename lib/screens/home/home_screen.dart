@@ -27,14 +27,14 @@ class HomeScreen extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Icon(
-                    Icons.hub,
+                    Icons.language,
                     size: 20,
                     color: Colors.white,
                   ),
                 ),
                 const SizedBox(width: 12),
                 const Text(
-                  'GlobeCast Mesh',
+                  'GlobeCast',
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -141,7 +141,7 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Start your WebRTC mesh meeting',
+                      'Ready to connect globally?',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Colors.grey,
                       ),
@@ -156,60 +156,30 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Peer-to-peer video conferencing',
+                      'Connect and communicate across languages',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Colors.grey,
                       ),
                     ),
                   ],
 
-                  const SizedBox(height: 24),
-
-                  // WebRTC Info Card
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      border: Border.all(color: Colors.blue, width: 1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.hub, color: Colors.blue),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'WebRTC Mesh Network',
-                              style: TextStyle(
-                                color: Colors.blue,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Direct peer-to-peer connections with no server in between. '
-                              'Ultra-low latency, end-to-end encrypted, and supports up to 6 participants.',
-                          style: TextStyle(
-                            color: Colors.grey[300],
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
                   const SizedBox(height: 32),
 
                   // Meeting buttons
                   _buildActionButton(
                     context: context,
-                    icon: Icons.add_circle,
-                    label: 'Create Mesh Meeting',
+                    icon: Icons.group,
+                    label: 'Join Meeting',
+                    color: Colors.blue,
+                    onPressed: () {
+                      Navigator.pushNamed(context, Routes.joinMeeting);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildActionButton(
+                    context: context,
+                    icon: Icons.video_call,
+                    label: 'Create Meeting',
                     color: Colors.blue,
                     onPressed: () {
                       Navigator.pushNamed(context, Routes.createMeeting);
@@ -218,58 +188,103 @@ class HomeScreen extends StatelessWidget {
                   const SizedBox(height: 16),
                   _buildActionButton(
                     context: context,
-                    icon: Icons.meeting_room,
-                    label: 'Join Meeting',
-                    color: Colors.green,
+                    icon: Icons.calendar_today,
+                    label: 'Schedule Meeting',
+                    color: Colors.transparent,
+                    borderColor: Colors.blue,
+                    textColor: Colors.blue,
                     onPressed: () {
-                      Navigator.pushNamed(context, Routes.joinMeeting);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Schedule Meeting coming soon!')),
+                      );
                     },
                   ),
 
                   const SizedBox(height: 32),
 
-                  // Features section
-                  Text(
-                    'WebRTC Mesh Features',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.white,
+                  // My Meetings section (only show if authenticated)
+                  if (authService.isAuthenticated) ...[
+                    Text(
+                      'My Meetings',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        _buildFeatureCard(
-                          icon: Icons.speed,
-                          title: 'Ultra Low Latency',
-                          description: 'Direct P2P connection for instant communication',
-                          color: Colors.green,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildFeatureCard(
-                          icon: Icons.security,
-                          title: 'End-to-End Encrypted',
-                          description: 'Your conversations are private and secure',
-                          color: Colors.blue,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildFeatureCard(
-                          icon: Icons.people,
-                          title: 'Up to 6 Participants',
-                          description: 'Optimal mesh network performance for small teams',
-                          color: Colors.orange,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildFeatureCard(
-                          icon: Icons.storage_outlined,
-                          title: 'No Server Recording',
-                          description: 'Nothing stored on servers, complete privacy',
-                          color: Colors.purple,
-                        ),
-                      ],
+                    // Meeting list
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          _buildMeetingCard(
+                            context: context,
+                            title: 'Weekly Team Standup',
+                            meetingId: 'GCM-123-456-789',
+                            time: 'Today, 2:00 PM',
+                            onJoin: () {
+                              Navigator.pushNamed(
+                                  context,
+                                  Routes.meeting,
+                                  arguments: {'code': 'GCM-123-456-789'}
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          _buildMeetingCard(
+                            context: context,
+                            title: 'Project Kickoff',
+                            meetingId: 'GCM-987-654-321',
+                            time: 'Tomorrow, 10:00 AM',
+                            onJoin: () {
+                              Navigator.pushNamed(
+                                  context,
+                                  Routes.meeting,
+                                  arguments: {'code': 'GCM-987-654-321'}
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  ] else ...[
+                    // Guest message
+                    Expanded(
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.account_circle_outlined,
+                              size: 80,
+                              color: Colors.grey[600],
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Sign in to access your meetings',
+                              style: TextStyle(
+                                color: Colors.grey[400],
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.pushNamed(context, Routes.signIn);
+                              },
+                              child: const Text(
+                                'Sign In Now',
+                                style: TextStyle(
+                                  color: Colors.blue,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -284,6 +299,8 @@ class HomeScreen extends StatelessWidget {
     required IconData icon,
     required String label,
     required Color color,
+    Color? borderColor,
+    Color? textColor,
     required VoidCallback onPressed,
   }) {
     return SizedBox(
@@ -293,6 +310,7 @@ class HomeScreen extends StatelessWidget {
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: color,
+          side: borderColor != null ? BorderSide(color: borderColor) : null,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
           ),
@@ -302,13 +320,13 @@ class HomeScreen extends StatelessWidget {
           children: [
             Icon(
               icon,
-              color: Colors.white,
+              color: textColor ?? Colors.white,
             ),
             const SizedBox(width: 8),
             Text(
               label,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: Colors.white,
+                color: textColor ?? Colors.white,
               ),
             ),
           ],
@@ -317,11 +335,12 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFeatureCard({
-    required IconData icon,
+  Widget _buildMeetingCard({
+    required BuildContext context,
     required String title,
-    required String description,
-    required Color color,
+    required String meetingId,
+    required String time,
+    required VoidCallback onJoin,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -336,12 +355,12 @@ class HomeScreen extends StatelessWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.2),
+                color: Colors.blue.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(
-                icon,
-                color: color,
+              child: const Icon(
+                Icons.videocam,
+                color: Colors.blue,
                 size: 24,
               ),
             ),
@@ -352,21 +371,46 @@ class HomeScreen extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w500,
-                      fontSize: 16,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    description,
-                    style: TextStyle(
-                      color: Colors.grey[400],
-                      fontSize: 14,
+                    meetingId,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    time,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.grey[500],
                     ),
                   ),
                 ],
+              ),
+            ),
+            ElevatedButton(
+              onPressed: onJoin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              child: const Text(
+                'Join',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ],
