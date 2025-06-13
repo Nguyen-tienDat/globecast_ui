@@ -1,33 +1,30 @@
 #!/usr/bin/env python3
 """
-GlobeCast Whisper Streaming Server
-Real-time Speech-to-Text and Translation for Flutter app
+GlobeCast Whisper Streaming Server - Final Working Version
 """
 
 import asyncio
 import websockets
 import json
 import logging
-import argparse
-import numpy as np
-from io import BytesIO
-import threading
-import queue
+import tempfile
+import os
 import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
-# Whisper Streaming imports
+
+# Whisper imports
 try:
     from faster_whisper import WhisperModel
     BACKEND_AVAILABLE = True
+    print("✅ faster-whisper available")
 except ImportError:
-    print("faster-whisper not installed. Install with: pip install faster-whisper")
+    print("❌ faster-whisper not installed. Install with: pip install faster-whisper")
     BACKEND_AVAILABLE = False
 
 @dataclass
 class TranscriptionResult:
-    """Result from Whisper transcription"""
     text: str
     language: str
     confidence: float
@@ -35,254 +32,241 @@ class TranscriptionResult:
     timestamp: float
     translation: Optional[str] = None
 
-class WhisperStreamingProcessor:
-    """Real-time Whisper processing with streaming capabilities"""
+# Global variables
+logger = logging.getLogger(__name__)
+clients = set()
+whisper_model = None
 
-    def __init__(self,
-                 model_size: str = "large-v3",
-                 language: str = "auto",
-                 task: str = "transcribe",
-                 device: str = "auto"):
+def initialize_whisper(model_name="base"):
+    """Initialize Whisper model"""
+    global whisper_model
 
-        if not BACKEND_AVAILABLE:
-            raise RuntimeError("faster-whisper not available")
+    if not BACKEND_AVAILABLE:
+        logger.error("faster-whisper not available")
+        return False
 
-        self.model_size = model_size
-        self.language = language
-        self.task = task
-        self.device = device
+    try:
+        logger.info(f"Loading Whisper model: {model_name}")
+        whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
+        logger.info("✅ Model loaded successfully")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Whisper: {e}")
+        return False
 
-        # Initialize Whisper model
-        print(f"Loading Whisper model: {model_size}")
-        self.model = WhisperModel(
-            model_size,
-            device=device,
-            compute_type="float16" if device == "cuda" else "int8"
+async def handle_client(websocket):
+    """Handle WebSocket client connection - SIMPLIFIED VERSION"""
+    client_address = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
+    logger.info(f"🔗 Client connected: {client_address}")
+    clients.add(websocket)
+
+    try:
+        # Send welcome message
+        welcome_msg = {
+            "type": "connection",
+            "status": "connected",
+            "message": "Connected to GlobeCast Whisper Server",
+            "model": "base" if whisper_model else "unavailable",
+            "timestamp": time.time()
+        }
+        await websocket.send(json.dumps(welcome_msg))
+
+        # Listen for messages
+        async for message in websocket:
+            await process_message(websocket, message)
+
+    except websockets.exceptions.ConnectionClosed:
+        logger.info(f"📴 Client disconnected: {client_address}")
+    except Exception as e:
+        logger.error(f"❌ Error handling client {client_address}: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        clients.discard(websocket)
+
+async def process_message(websocket, message):
+    """Process incoming message from client"""
+    try:
+        # Handle JSON messages
+        if isinstance(message, str):
+            try:
+                data = json.loads(message)
+                await handle_json_message(websocket, data)
+                return
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON received")
+                return
+
+        # Handle binary data (audio)
+        if isinstance(message, bytes):
+            await handle_audio_data(websocket, message)
+
+    except Exception as e:
+        logger.error(f"Error processing message: {e}")
+        await send_error(websocket, f"Error: {str(e)}")
+
+async def handle_json_message(websocket, data):
+    """Handle JSON text messages"""
+    message_type = data.get("type", "unknown")
+    logger.info(f"📨 Received JSON message: {message_type}")
+
+    if message_type == "test":
+        response = {
+            "type": "test_response",
+            "message": "✅ Test message received successfully!",
+            "echo": data.get("message", ""),
+            "server_status": "running",
+            "model_status": "loaded" if whisper_model else "not_loaded",
+            "timestamp": time.time()
+        }
+        await websocket.send(json.dumps(response))
+        logger.info("📤 Test response sent")
+
+    elif message_type == "ping":
+        response = {"type": "pong", "timestamp": time.time()}
+        await websocket.send(json.dumps(response))
+
+    else:
+        logger.warning(f"❓ Unknown message type: {message_type}")
+
+async def handle_audio_data(websocket, audio_data):
+    """Handle audio data and perform transcription"""
+    logger.info(f"🎵 Processing audio data: {len(audio_data)} bytes")
+
+    if not whisper_model:
+        await send_error(websocket, "Whisper model not available")
+        return
+
+    try:
+        # Save audio to temp file
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_path = temp_file.name
+
+        # Transcribe audio
+        result = await transcribe_audio(temp_path)
+
+        # Send result
+        if result:
+            response = {
+                "type": "transcription",
+                "text": result.text,
+                "language": result.language,
+                "confidence": result.confidence,
+                "is_final": result.is_final,
+                "timestamp": result.timestamp
+            }
+
+            if result.translation:
+                response["translation"] = result.translation
+
+            await websocket.send(json.dumps(response))
+            logger.info(f"📝 Transcription sent: {result.text[:50]}...")
+        else:
+            await send_error(websocket, "No transcription generated")
+
+        # Cleanup
+        try:
+            os.unlink(temp_path)
+        except:
+            pass
+
+    except Exception as e:
+        logger.error(f"❌ Error processing audio: {e}")
+        await send_error(websocket, f"Audio processing error: {str(e)}")
+
+async def transcribe_audio(audio_path):
+    """Transcribe audio file using Whisper"""
+    try:
+        # Run transcription in thread pool
+        loop = asyncio.get_event_loop()
+        segments, info = await loop.run_in_executor(
+            None,
+            lambda: whisper_model.transcribe(audio_path, task="transcribe")
         )
 
-        # Audio processing parameters
-        self.sample_rate = 16000
-        self.chunk_duration = 1.0  # 1 second chunks
-        self.buffer_duration = 10.0  # 10 second buffer
+        # Combine segments
+        full_text = ""
+        confidence_scores = []
 
-        # Audio buffer
-        self.audio_buffer = np.array([], dtype=np.float32)
-        self.last_processed_time = 0
-        self.processing_lock = threading.Lock()
+        for segment in segments:
+            full_text += segment.text + " "
+            confidence_scores.append(getattr(segment, 'avg_logprob', 0))
 
-        print(f"Whisper processor initialized - Language: {language}, Task: {task}")
-
-    def add_audio_chunk(self, audio_data: bytes) -> None:
-        """Add audio chunk to processing buffer"""
-        try:
-            # Convert bytes to numpy array
-            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-
-            with self.processing_lock:
-                self.audio_buffer = np.concatenate([self.audio_buffer, audio_array])
-
-                # Trim buffer if too long
-                max_samples = int(self.buffer_duration * self.sample_rate)
-                if len(self.audio_buffer) > max_samples:
-                    self.audio_buffer = self.audio_buffer[-max_samples:]
-
-        except Exception as e:
-            logging.error(f"Error adding audio chunk: {e}")
-
-    def process_audio(self) -> Optional[TranscriptionResult]:
-        """Process current audio buffer and return transcription"""
-        try:
-            with self.processing_lock:
-                if len(self.audio_buffer) < int(self.chunk_duration * self.sample_rate):
-                    return None
-
-                # Get audio to process
-                audio_to_process = self.audio_buffer.copy()
-
-            # Transcribe with Whisper
-            segments, info = self.model.transcribe(
-                audio_to_process,
-                language=None if self.language == "auto" else self.language,
-                task=self.task,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500),
-                word_timestamps=True
-            )
-
-            # Combine segments
-            full_text = ""
-            confidence_scores = []
-
-            for segment in segments:
-                full_text += segment.text + " "
-                confidence_scores.append(segment.avg_logprob)
-
-            if not full_text.strip():
-                return None
-
-            # Calculate average confidence
-            avg_confidence = np.mean(confidence_scores) if confidence_scores else 0.0
-            confidence = float(np.exp(avg_confidence))  # Convert log prob to probability
-
-            # Determine if translation occurred
-            translation = None
-            if self.task == "translate" and info.language != "en":
-                translation = full_text.strip()
-
-            result = TranscriptionResult(
-                text=full_text.strip(),
-                language=info.language,
-                confidence=confidence,
-                is_final=True,
-                timestamp=time.time(),
-                translation=translation
-            )
-
-            return result
-
-        except Exception as e:
-            logging.error(f"Error processing audio: {e}")
+        if not full_text.strip():
             return None
 
-class GlobeCastWhisperServer:
-    """WebSocket server for GlobeCast Flutter app"""
+        avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
 
-    def __init__(self, host: str = "localhost", port: int = 8765):
-        self.host = host
-        self.port = port
-        self.processors: Dict[str, WhisperStreamingProcessor] = {}
+        return TranscriptionResult(
+            text=full_text.strip(),
+            language=info.language,
+            confidence=float(avg_confidence),
+            is_final=True,
+            timestamp=time.time()
+        )
 
-    async def handle_client(self, websocket, path):
-        """Handle WebSocket client connection"""
-        client_id = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
-        logging.info(f"Client connected: {client_id}")
+    except Exception as e:
+        logger.error(f"Transcription failed: {e}")
+        return None
 
-        try:
-            async for message in websocket:
-                await self.process_message(websocket, client_id, message)
+async def send_error(websocket, error_message):
+    """Send error message to client"""
+    error_response = {
+        "type": "error",
+        "message": error_message,
+        "timestamp": time.time()
+    }
+    try:
+        await websocket.send(json.dumps(error_response))
+    except:
+        pass
 
-        except websockets.exceptions.ConnectionClosed:
-            logging.info(f"Client disconnected: {client_id}")
-        except Exception as e:
-            logging.error(f"Error handling client {client_id}: {e}")
-        finally:
-            # Cleanup
-            if client_id in self.processors:
-                del self.processors[client_id]
+async def start_server(host="localhost", port=8766):
+    """Start the WebSocket server"""
+    logger.info(f"🚀 Starting GlobeCast Whisper Server on {host}:{port}")
 
-    async def process_message(self, websocket, client_id: str, message):
-        """Process incoming message from Flutter app"""
-        try:
-            if isinstance(message, bytes):
-                # Audio data
-                if client_id in self.processors:
-                    self.processors[client_id].add_audio_chunk(message)
+    try:
+        # Start WebSocket server - SIMPLIFIED without path argument
+        server = await websockets.serve(
+            handle_client,  # No path argument needed
+            host,
+            port,
+            ping_interval=20,
+            ping_timeout=10,
+            max_size=10 * 1024 * 1024
+        )
 
-                    # Process and send result
-                    result = self.processors[client_id].process_audio()
-                    if result:
-                        response = {
-                            "type": "transcription",
-                            "data": {
-                                "text": result.text,
-                                "language": result.language,
-                                "confidence": result.confidence,
-                                "is_final": result.is_final,
-                                "timestamp": result.timestamp,
-                                "translation": result.translation
-                            }
-                        }
-                        await websocket.send(json.dumps(response))
-            else:
-                # JSON command
-                data = json.loads(message)
-                await self.handle_command(websocket, client_id, data)
+        logger.info("✅ Server started successfully!")
+        logger.info("⏳ Waiting for connections...")
 
-        except Exception as e:
-            logging.error(f"Error processing message: {e}")
-            error_response = {
-                "type": "error",
-                "message": str(e)
-            }
-            await websocket.send(json.dumps(error_response))
+        # Keep server running
+        await server.wait_closed()
 
-    async def handle_command(self, websocket, client_id: str, data: Dict[str, Any]):
-        """Handle JSON commands from Flutter"""
-        command = data.get("command")
-
-        if command == "start_transcription":
-            # Initialize processor for this client
-            language = data.get("language", "auto")
-            task = data.get("task", "transcribe")  # transcribe or translate
-            model_size = data.get("model", "large-v3")
-
-            try:
-                self.processors[client_id] = WhisperStreamingProcessor(
-                    model_size=model_size,
-                    language=language,
-                    task=task
-                )
-
-                response = {
-                    "type": "status",
-                    "message": f"Transcription started - Language: {language}, Task: {task}"
-                }
-                await websocket.send(json.dumps(response))
-
-            except Exception as e:
-                error_response = {
-                    "type": "error",
-                    "message": f"Failed to start transcription: {e}"
-                }
-                await websocket.send(json.dumps(error_response))
-
-        elif command == "stop_transcription":
-            if client_id in self.processors:
-                del self.processors[client_id]
-
-            response = {
-                "type": "status",
-                "message": "Transcription stopped"
-            }
-            await websocket.send(json.dumps(response))
-
-        elif command == "ping":
-            response = {
-                "type": "pong",
-                "timestamp": time.time()
-            }
-            await websocket.send(json.dumps(response))
-
-    async def start_server(self):
-        """Start the WebSocket server"""
-        logging.info(f"Starting GlobeCast Whisper Server on {self.host}:{self.port}")
-
-        async with websockets.serve(self.handle_client, self.host, self.port):
-            logging.info("Server started successfully!")
-            await asyncio.Future()  # Run forever
+    except Exception as e:
+        logger.error(f"❌ Server error: {e}")
+        raise
 
 def main():
-    parser = argparse.ArgumentParser(description="GlobeCast Whisper Streaming Server")
-    parser.add_argument("--host", default="localhost", help="Server host")
-    parser.add_argument("--port", type=int, default=8765, help="Server port")
-    parser.add_argument("--log-level", default="INFO", help="Logging level")
-
-    args = parser.parse_args()
-
+    """Main function"""
     # Setup logging
     logging.basicConfig(
-        level=getattr(logging, args.log_level.upper()),
+        level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
-    # Check if backend is available
-    if not BACKEND_AVAILABLE:
-        logging.error("faster-whisper not available. Please install requirements.")
+    # Initialize Whisper
+    if not initialize_whisper("base"):
+        print("❌ Failed to initialize Whisper model")
         return
 
     # Start server
-    server = GlobeCastWhisperServer(host=args.host, port=args.port)
-    asyncio.run(server.start_server())
+    try:
+        asyncio.run(start_server())
+    except KeyboardInterrupt:
+        print("\n👋 Shutting down server...")
+    except Exception as e:
+        print(f"❌ Server failed to start: {e}")
 
 if __name__ == "__main__":
     main()

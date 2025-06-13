@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whisper Server Test Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            font-weight: bold;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        .disconnected { background: rgba(220, 53, 69, 0.8); }
+        .connected { background: rgba(40, 167, 69, 0.8); }
+        .connecting { background: rgba(255, 193, 7, 0.8); color: #000; }
+
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            margin: 10px 5px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .controls {
+            text-align: center;
+            margin: 25px 0;
+        }
+
+        #audioInput {
+            display: none;
+        }
+
+        .file-upload {
+            background: linear-gradient(45deg, #74b9ff, #0984e3);
+            display: inline-block;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin: 10px 5px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            font-weight: bold;
+        }
+        .file-upload:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        #log {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 20px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            margin-top: 20px;
+        }
+
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .log-error { color: #ff6b6b; }
+        .log-success { color: #51cf66; }
+        .log-info { color: #74c0fc; }
+
+        .result-box {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.6;
+            min-height: 50px;
+            border-left: 5px solid #51cf66;
+        }
+
+        .server-info {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🎤 Whisper Server Test</h1>
+
+    <div class="server-info">
+        <strong>📡 Server Info:</strong><br>
+        WebSocket URL: ws://localhost:8766<br>
+        Make sure the Whisper server is running before connecting!
+    </div>
+
+    <div id="status" class="status disconnected">
+        🔴 Disconnected from Server
+    </div>
+
+    <div class="controls">
+        <button id="connectBtn" onclick="connect()">🔗 Connect to Server</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>⚡ Disconnect</button>
+
+        <br><br>
+
+        <button id="recordBtn" onclick="toggleRecording()" disabled>🎤 Start Recording</button>
+
+        <label for="audioInput" class="file-upload">
+            📁 Upload Audio File
+        </label>
+        <input type="file" id="audioInput" accept="audio/*" onchange="handleFileUpload(event)">
+
+        <button onclick="sendTestMessage()" disabled id="testBtn">🧪 Send Test Message</button>
+        <button onclick="clearLog()" id="clearBtn">🗑️ Clear Log</button>
+    </div>
+
+    <div class="result-box" id="resultBox">
+        <strong>📝 Transcription Results</strong><br>
+        Results will appear here after processing audio...
+    </div>
+
+    <div id="log"></div>
+</div>
+
+<script>
+    let ws = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 3;
+
+    function log(message, type = 'info') {
+        const logDiv = document.getElementById('log');
+        const entry = document.createElement('div');
+        entry.className = `log-entry log-${type}`;
+        const timestamp = new Date().toLocaleTimeString();
+        entry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+        logDiv.appendChild(entry);
+        logDiv.scrollTop = logDiv.scrollHeight;
+
+        // Also log to console for debugging
+        console.log(`${timestamp} [${type.toUpperCase()}] ${message}`);
+    }
+
+    function updateStatus(status, message) {
+        const statusDiv = document.getElementById('status');
+        statusDiv.className = `status ${status}`;
+        statusDiv.innerHTML = message;
+    }
+
+    function clearLog() {
+        document.getElementById('log').innerHTML = '';
+        log('Log cleared', 'info');
+    }
+
+    function connect() {
+        updateStatus('connecting', '🟡 Connecting to server...');
+        log('Attempting to connect to WebSocket server at ws://localhost:8766', 'info');
+
+        try {
+            ws = new WebSocket('ws://localhost:8766');
+
+            ws.onopen = function(event) {
+                updateStatus('connected', '🟢 Connected to Whisper Server');
+                log('✅ Successfully connected to Whisper server!', 'success');
+                reconnectAttempts = 0;
+
+                // Enable buttons
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                document.getElementById('recordBtn').disabled = false;
+                document.getElementById('testBtn').disabled = false;
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    log(`📨 Received message: ${data.type}`, 'success');
+
+                    // Handle different message types
+                    if (data.type === 'transcription') {
+                        displayTranscription(data);
+                    } else if (data.type === 'test_response') {
+                        displayTestResponse(data);
+                    } else if (data.type === 'connection') {
+                        log(`Connection established - Model: ${data.model}`, 'success');
+                    } else if (data.type === 'error') {
+                        log(`❌ Server error: ${data.message}`, 'error');
+                        displayError(data.message);
+                    } else {
+                        log(`📦 Raw data: ${JSON.stringify(data)}`, 'info');
+                    }
+                } catch (e) {
+                    log(`📨 Raw message: ${event.data}`, 'info');
+                }
+            };
+
+            ws.onclose = function(event) {
+                updateStatus('disconnected', '🔴 Disconnected from Server');
+                log(`Connection closed - Code: ${event.code}, Reason: ${event.reason || 'Unknown'}`, 'error');
+
+                // Disable buttons
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('recordBtn').disabled = true;
+                document.getElementById('testBtn').disabled = true;
+
+                // Reset recording state
+                if (isRecording) {
+                    isRecording = false;
+                    document.getElementById('recordBtn').textContent = '🎤 Start Recording';
+                }
+            };
+
+            ws.onerror = function(error) {
+                updateStatus('disconnected', '🔴 Connection Error');
+                log(`❌ WebSocket error occurred`, 'error');
+                console.error('WebSocket error:', error);
+            };
+
+        } catch (error) {
+            updateStatus('disconnected', '🔴 Failed to Connect');
+            log(`❌ Failed to create WebSocket connection: ${error.message}`, 'error');
+        }
+    }
+
+    function disconnect() {
+        if (ws) {
+            ws.close(1000, 'User disconnected');
+            log('👋 Manually disconnected from server', 'info');
+        }
+    }
+
+    function sendTestMessage() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            const testMsg = {
+                type: 'test',
+                message: 'Hello from GlobeCast test client!',
+                timestamp: Date.now()
+            };
+
+            ws.send(JSON.stringify(testMsg));
+            log(`📤 Sent test message`, 'info');
+        } else {
+            log('❌ Cannot send test message - WebSocket not connected!', 'error');
+        }
+    }
+
+    async function toggleRecording() {
+        const recordBtn = document.getElementById('recordBtn');
+
+        if (!isRecording) {
+            try {
+                log('🎤 Requesting microphone access...', 'info');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                mediaRecorder = new MediaRecorder(stream, {
+                    audioBitsPerSecond: 128000
+                });
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = function(event) {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = function() {
+                    log('🎵 Recording stopped, creating audio blob...', 'info');
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    log(`📦 Audio blob created: ${audioBlob.size} bytes`, 'info');
+                    sendAudioData(audioBlob);
+
+                    // Stop all tracks to release microphone
+                    stream.getTracks().forEach(track => {
+                        track.stop();
+                        log('🔇 Microphone track stopped', 'info');
+                    });
+                };
+
+                mediaRecorder.start(1000); // Collect data every 1 second
+                isRecording = true;
+                recordBtn.textContent = '⏹️ Stop Recording';
+                recordBtn.style.background = 'linear-gradient(45deg, #e74c3c, #c0392b)';
+                log('🔴 Recording started...', 'success');
+
+            } catch (error) {
+                log(`❌ Microphone access error: ${error.message}`, 'error');
+                updateStatus('disconnected', '🔴 Microphone Access Denied');
+            }
+        } else {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                isRecording = false;
+                recordBtn.textContent = '🎤 Start Recording';
+                recordBtn.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a24)';
+                log('⏹️ Recording stopped, processing audio...', 'info');
+            }
+        }
+    }
+
+    function handleFileUpload(event) {
+        const file = event.target.files[0];
+        if (file) {
+            log(`📁 File selected: ${file.name} (${file.size} bytes, ${file.type})`, 'info');
+            sendAudioData(file);
+        }
+    }
+
+    function sendAudioData(audioData) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            log('❌ Cannot send audio - WebSocket not connected!', 'error');
+            return;
+        }
+
+        log('📤 Preparing to send audio data...', 'info');
+
+        const reader = new FileReader();
+        reader.onload = function() {
+            const arrayBuffer = reader.result;
+            const uint8Array = new Uint8Array(arrayBuffer);
+
+            log(`📡 Sending audio data: ${uint8Array.length} bytes`, 'info');
+
+            try {
+                ws.send(uint8Array);
+                log('✅ Audio data sent successfully', 'success');
+
+                // Show processing message
+                document.getElementById('resultBox').innerHTML =
+                    '<strong>🔄 Processing Audio...</strong><br>Please wait while the server transcribes your audio...';
+
+            } catch (error) {
+                log(`❌ Failed to send audio: ${error.message}`, 'error');
+            }
+        };
+
+        reader.onerror = function() {
+            log('❌ Failed to read audio file', 'error');
+        };
+
+        reader.readAsArrayBuffer(audioData);
+    }
+
+    function displayTranscription(data) {
+        const resultBox = document.getElementById('resultBox');
+        resultBox.innerHTML = `
+            <strong>📝 Transcription Result:</strong><br>
+            <div style="font-size: 20px; margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 5px; color: #333;">
+                "${data.text}"
+            </div>
+            <small>
+                🌐 Language: <strong>${data.language}</strong> |
+                📊 Confidence: <strong>${(data.confidence * 100).toFixed(1)}%</strong> |
+                ⏰ ${new Date(data.timestamp * 1000).toLocaleTimeString()}
+            </small>
+        `;
+    }
+
+    function displayTestResponse(data) {
+        const resultBox = document.getElementById('resultBox');
+        resultBox.innerHTML = `
+            <strong>🧪 Test Response:</strong><br>
+            <div style="margin: 10px 0;">
+                📬 Message: <strong>${data.message}</strong><br>
+                🟢 Server Status: <strong>${data.server_status}</strong><br>
+                🤖 Model Status: <strong>${data.model_status}</strong><br>
+                📡 Echo: "${data.echo}"
+            </div>
+        `;
+    }
+
+    function displayError(errorMessage) {
+        const resultBox = document.getElementById('resultBox');
+        resultBox.innerHTML = `
+            <strong>❌ Error:</strong><br>
+            <div style="color: #e74c3c; margin: 10px 0; padding: 10px; background: #fdf2f2; border-radius: 5px;">
+                ${errorMessage}
+            </div>
+        `;
+    }
+
+    // Initialize on page load
+    window.onload = function() {
+        log('🚀 Whisper Test Client loaded successfully', 'success');
+        log('📋 Instructions:', 'info');
+        log('1. Make sure Whisper server is running on port 8766', 'info');
+        log('2. Click "Connect to Server" to establish connection', 'info');
+        log('3. Use "Start Recording" or "Upload Audio File" to test transcription', 'info');
+        log('4. Use "Send Test Message" to test basic connectivity', 'info');
+    };
+</script>
+</body>
+</html>
