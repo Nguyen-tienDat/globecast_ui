@@ -1,12 +1,15 @@
-// lib/screens/meeting/meeting_screen.dart
+// lib/screens/meeting/meeting_screen.dart (UPDATED)
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
+import 'package:globecast_ui/services/whisper_service.dart';
 import 'package:provider/provider.dart';
 import 'package:globecast_ui/screens/meeting/controller.dart';
 import 'package:globecast_ui/screens/meeting/widgets/chat_panel.dart';
 import 'package:globecast_ui/screens/meeting/widgets/participants_panel.dart';
 import 'package:globecast_ui/screens/meeting/widgets/language_selection_panel.dart';
+import 'package:globecast_ui/widgets/subtitle_display_widget.dart';
+import 'package:globecast_ui/screens/meeting/language_selection_screen.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 
 import '../../router/app_router.dart';
@@ -25,8 +28,10 @@ class MeetingScreen extends StatefulWidget {
 
 class _MeetingScreenState extends State<MeetingScreen> {
   late WebRTCMeshMeetingService _webrtcService;
+  WhisperService? _whisperService;
   bool _isJoining = true;
   String? _errorMessage;
+  bool _hasSetupLanguages = false;
 
   @override
   void initState() {
@@ -43,20 +48,59 @@ class _MeetingScreenState extends State<MeetingScreen> {
       });
 
       // Set default user details if not already set
-      _webrtcService.setUserDetails(displayName: 'User ${DateTime.now().millisecondsSinceEpoch % 1000}');
+      _webrtcService.setUserDetails(
+        displayName: 'User ${DateTime.now().millisecondsSinceEpoch % 1000}',
+        nativeLanguage: 'en',
+        displayLanguage: 'en',
+      );
 
       // Join the meeting
       await _webrtcService.joinMeeting(meetingId: widget.code);
 
+      // Get Whisper service reference
+      _whisperService = _webrtcService.whisperService;
+
       setState(() {
         _isJoining = false;
       });
+
+      // Show language selection if user hasn't set languages yet
+      if (!_hasSetupLanguages) {
+        _showLanguageSetup();
+      }
     } catch (e) {
       setState(() {
         _isJoining = false;
         _errorMessage = e.toString();
       });
     }
+  }
+
+  void _showLanguageSetup() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Navigator.of(context).push(
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              LanguageSelectionScreen(
+                meetingId: widget.code,
+                onLanguagesSelected: () {
+                  setState(() {
+                    _hasSetupLanguages = true;
+                  });
+                },
+              ),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(1.0, 0.0),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            );
+          },
+        ),
+      );
+    });
   }
 
   void _navigateToHome() {
@@ -86,7 +130,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Connecting to mesh network',
+                'Setting up real-time translation',
                 style: TextStyle(color: Colors.grey[500], fontSize: 12),
               ),
             ],
@@ -142,6 +186,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       );
     }
 
+    // Only provide MeetingController, WhisperService is accessed through WebRTC service
     return ChangeNotifierProvider(
       create: (context) {
         final controller = MeetingController(_webrtcService);
@@ -185,7 +230,7 @@ class _MeetingContent extends StatelessWidget {
 
                   // Subtitle area
                   if (controller.areSubtitlesVisible)
-                    _buildSubtitleArea(context, controller),
+                    _buildSubtitleArea(context),
 
                   // Control panel
                   _buildControlBar(context, controller),
@@ -249,6 +294,74 @@ class _MeetingContent extends StatelessWidget {
             ),
           ),
 
+          // Translation status
+          Consumer<WhisperService>(
+            builder: (context, whisperService, child) {
+              if (whisperService.isConnected) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.translate,
+                        color: Colors.green,
+                        size: 12,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Live Translation',
+                        style: TextStyle(
+                          color: Colors.green,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              } else {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: Colors.orange,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Connecting...',
+                        style: TextStyle(
+                          color: Colors.orange,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+            },
+          ),
+
+          const SizedBox(width: 8),
+
           // Participants count
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -288,7 +401,7 @@ class _MeetingContent extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(
-              Icons.play_circle_outline,
+              Icons.videocam,
               color: Colors.white,
               size: 32,
             ),
@@ -346,6 +459,27 @@ class _MeetingContent extends StatelessWidget {
                   ),
                 ),
 
+                // Language indicator
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      participant.nativeLanguage.toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+
                 // Name at bottom
                 Positioned(
                   bottom: 0,
@@ -386,57 +520,12 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  Widget _buildSubtitleArea(BuildContext context, MeetingController controller) {
-    // Mock subtitle for demo
+  Widget _buildSubtitleArea(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      color: Colors.black,
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.green.withOpacity(0.2),
-          border: Border.all(color: Colors.green, width: 1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.blue,
-              child: Text(
-                controller.participants.isNotEmpty ? controller.participants.first.name[0].toUpperCase() : '?',
-                style: const TextStyle(fontSize: 12, color: Colors.white),
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Speaking...',
-                    style: TextStyle(
-                      color: Colors.green,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'Real-time transcription will appear here',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: SubtitleDisplayWidget(
+        isVisible: true,
+        maxHeight: 120,
       ),
     );
   }
@@ -459,6 +548,20 @@ class _MeetingContent extends StatelessWidget {
             label: controller.isCameraOn ? 'Camera On' : 'Camera Off',
             isActive: controller.isCameraOn,
             onPressed: controller.toggleCamera,
+          ),
+          _buildControlButton(
+            icon: Icons.closed_caption,
+            label: controller.areSubtitlesVisible ? 'Hide Subtitles' : 'Show Subtitles',
+            isActive: true,
+            isHighlighted: controller.areSubtitlesVisible,
+            onPressed: controller.toggleSubtitlesVisibility,
+          ),
+          _buildControlButton(
+            icon: Icons.translate,
+            label: 'Language',
+            isActive: true,
+            isHighlighted: controller.isLanguageMenuVisible,
+            onPressed: () => _showLanguageDialog(context),
           ),
           _buildControlButton(
             icon: Icons.chat,
@@ -551,6 +654,34 @@ class _MeetingContent extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  void _showLanguageDialog(BuildContext context) {
+    final webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
+
+    showDialog(
+      context: context,
+      builder: (context) => LanguageSelectionDialog(
+        currentNativeLanguage: webrtcService.userNativeLanguage,
+        currentDisplayLanguage: webrtcService.userDisplayLanguage,
+        onLanguagesChanged: (nativeLanguage, displayLanguage) async {
+          await webrtcService.updateLanguageSettings(
+            nativeLanguage: nativeLanguage,
+            displayLanguage: displayLanguage,
+          );
+
+          // Show confirmation
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Languages updated! Speaking: $nativeLanguage, Viewing: $displayLanguage',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+        },
+      ),
     );
   }
 
