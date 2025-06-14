@@ -1,4 +1,4 @@
-// lib/main.dart
+// lib/main.dart - PROVIDER FIX
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,22 +12,43 @@ import 'package:provider/provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Configure system UI
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  print('🚀 Initializing GlobeCast...');
 
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Colors.black,
-      systemNavigationBarIconBrightness: Brightness.light,
-    ),
-  );
+  // Configure system UI
+  await _configureSystemUI();
 
   // Initialize Firebase
+  await _initializeFirebase();
+
+  runApp(const GlobeCastApp());
+}
+
+Future<void> _configureSystemUI() async {
+  try {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+
+   SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: GcbAppTheme.background,
+        systemNavigationBarIconBrightness: Brightness.light,
+        systemNavigationBarDividerColor: Colors.transparent,
+        systemNavigationBarContrastEnforced: false,
+      ),
+    );
+
+    print('✅ System UI configured successfully');
+  } catch (e) {
+    print('⚠️ System UI configuration warning: $e');
+  }
+}
+
+Future<void> _initializeFirebase() async {
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -35,9 +56,8 @@ void main() async {
     print('✅ Firebase initialized successfully');
   } catch (e) {
     print('❌ Firebase initialization failed: $e');
+    print('⚠️ Continuing without Firebase - some features may be limited');
   }
-
-  runApp(const GlobeCastApp());
 }
 
 class GlobeCastApp extends StatelessWidget {
@@ -45,65 +65,97 @@ class GlobeCastApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<void>(
-      future: _initializeServices(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return MaterialApp(
-            title: 'GlobeCast',
-            theme: GcbAppTheme.darkTheme,
-            home: const SplashScreen(),
-            debugShowCheckedModeBanner: false,
-          );
-        }
+    // Create services ONCE at app level
+    return MultiProvider(
+      providers: [
+        // Auth service
+        ChangeNotifierProvider<AuthService>(
+          create: (_) {
+            print('🔐 Creating AuthService...');
+            return AuthService();
+          },
+          lazy: false,
+        ),
 
-        if (snapshot.hasError) {
-          return MaterialApp(
-            title: 'GlobeCast',
-            theme: GcbAppTheme.darkTheme,
-            home: InitializationErrorScreen(error: snapshot.error.toString()),
-            debugShowCheckedModeBanner: false,
-          );
-        }
+        // WebRTC service - CRITICAL: Must be created here
+        ChangeNotifierProvider<WebRTCMeshMeetingService>(
+          create: (_) {
+            print('🌐 Creating WebRTCMeshMeetingService...');
+            final service = WebRTCMeshMeetingService();
+            // Initialize asynchronously but don't await here
+            service.initialize().then((_) {
+              print('✅ WebRTC service initialized');
+            }).catchError((error) {
+              print('❌ WebRTC service initialization error: $error');
+            });
+            return service;
+          },
+          lazy: false, // IMPORTANT: Create immediately
+        ),
+      ],
+      child: _GlobeCastMaterialApp(),
+    );
+  }
+}
 
-        return const MainApp();
+class _GlobeCastMaterialApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Consumer2<AuthService, WebRTCMeshMeetingService>(
+      builder: (context, authService, webrtcService, child) {
+        return MaterialApp(
+          title: 'GlobeCast - Real-time Translation',
+          theme: GcbAppTheme.darkTheme,
+          debugShowCheckedModeBanner: false,
+
+          // Navigation configuration
+          initialRoute: Routes.welcome,
+          routes: Routes().routes,
+
+          // Global app configuration
+          builder: (context, child) {
+            return MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaleFactor: 1.0,
+              ),
+              child: _AppWrapper(child: child),
+            );
+          },
+
+          // Error handling for navigation
+          onUnknownRoute: (settings) {
+            print('❌ Unknown route: ${settings.name}');
+            return MaterialPageRoute(
+              builder: (context) => const _UnknownRouteScreen(),
+            );
+          },
+        );
       },
     );
   }
-
-  Future<void> _initializeServices() async {
-    print('🚀 Initializing GlobeCast services...');
-
-    // Add any global initialization here
-    await Future.delayed(const Duration(seconds: 1)); // Simulate initialization
-
-    print('✅ Services initialized successfully');
-  }
 }
 
-class MainApp extends StatefulWidget {
-  const MainApp({super.key});
+class _AppWrapper extends StatefulWidget {
+  final Widget? child;
+
+  const _AppWrapper({this.child});
 
   @override
-  State<MainApp> createState() => _MainAppState();
+  State<_AppWrapper> createState() => _AppWrapperState();
 }
 
-class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
-  late final AuthService _authService;
-  late final WebRTCMeshMeetingService _webrtcService;
-  late final Routes _routes;
-
+class _AppWrapperState extends State<_AppWrapper> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeAppServices();
+    print('📱 App lifecycle observer added');
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _cleanupServices();
+    print('📱 App lifecycle observer removed');
     super.dispose();
   }
 
@@ -111,367 +163,105 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
+    print('📱 App lifecycle changed: $state');
+
     switch (state) {
-      case AppLifecycleState.paused:
-        print('📱 App paused');
-        break;
       case AppLifecycleState.resumed:
-        print('📱 App resumed');
-        _checkConnections();
+        _handleAppResumed();
+        break;
+      case AppLifecycleState.paused:
+        _handleAppPaused();
         break;
       case AppLifecycleState.detached:
-        print('📱 App detached - cleaning up');
-        _cleanupServices();
+        _handleAppDetached();
         break;
-      default:
+      case AppLifecycleState.inactive:
+        _handleAppInactive();
+        break;
+      case AppLifecycleState.hidden:
+        _handleAppHidden();
         break;
     }
   }
 
-  void _initializeAppServices() {
+  void _handleAppResumed() {
+    print('🔄 App resumed - checking service connections...');
     try {
-      print('⚙️ Initializing app services...');
-
-      _authService = AuthService();
-      _webrtcService = WebRTCMeshMeetingService();
-      _routes = Routes();
-
-      // Initialize WebRTC service asynchronously
-      _webrtcService.initialize().then((_) {
-        print('✅ WebRTC service initialized');
-      }).catchError((error) {
-        print('❌ WebRTC initialization error: $error');
-      });
-
-      print('✅ App services ready');
+      final webrtcService = context.read<WebRTCMeshMeetingService>();
+      if (webrtcService.isMeetingActive) {
+        print('🎥 Meeting is active - maintaining connections');
+      }
     } catch (e) {
-      print('❌ Service initialization error: $e');
+      print('⚠️ Error accessing WebRTC service on resume: $e');
     }
   }
 
-  void _checkConnections() {
-    // Check and reconnect services if needed
-    if (_webrtcService.isMeetingActive) {
-      print('🔄 Checking meeting connections...');
-    }
+  void _handleAppPaused() {
+    print('⏸️ App paused - maintaining background services');
   }
 
-  void _cleanupServices() {
+  void _handleAppInactive() {
+    print('😴 App inactive');
+  }
+
+  void _handleAppHidden() {
+    print('🙈 App hidden');
+  }
+
+  void _handleAppDetached() {
+    print('🔌 App detached - cleaning up services');
     try {
-      print('🧹 Cleaning up services...');
-      _webrtcService.dispose();
-      _authService.dispose();
+      final webrtcService = context.read<WebRTCMeshMeetingService>();
+      webrtcService.dispose();
     } catch (e) {
-      print('⚠️ Cleanup error: $e');
+      print('⚠️ Service cleanup error: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider<AuthService>.value(value: _authService),
-        ChangeNotifierProvider<WebRTCMeshMeetingService>.value(value: _webrtcService),
-      ],
-      child: Consumer<AuthService>(
-        builder: (context, authService, child) {
-          return MaterialApp(
-            title: 'GlobeCast - Real-time Translation',
-            theme: GcbAppTheme.darkTheme,
-            debugShowCheckedModeBanner: false,
-
-            // Navigation setup
-            initialRoute: Routes.welcome,
-            routes: _routes.routes,
-
-            // Global configurations
-            builder: (context, child) {
-              return MediaQuery(
-                data: MediaQuery.of(context).copyWith(
-                  textScaleFactor: 1.0,
-                ),
-                child: child ?? const SizedBox(),
-              );
-            },
-          );
-        },
-      ),
-    );
+    return widget.child ?? const SizedBox.shrink();
   }
 }
 
-// Splash Screen
-class SplashScreen extends StatelessWidget {
-  const SplashScreen({Key? key}) : super(key: key);
+class _UnknownRouteScreen extends StatelessWidget {
+  const _UnknownRouteScreen();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: GcbAppTheme.background,
-      body: Center(
+      appBar: AppBar(
+        backgroundColor: GcbAppTheme.background,
+        title: const Text('Page Not Found'),
+      ),
+      body: const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // App logo
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    GcbAppTheme.primary,
-                    GcbAppTheme.primary.withOpacity(0.7),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(60),
-                boxShadow: [
-                  BoxShadow(
-                    color: GcbAppTheme.primary.withOpacity(0.3),
-                    blurRadius: 20,
-                    spreadRadius: 5,
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.language,
-                size: 60,
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: Colors.red,
+            ),
+            SizedBox(height: 16),
+            Text(
+              '404 - Page Not Found',
+              style: TextStyle(
                 color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
               ),
             ),
-
-            const SizedBox(height: 32),
-
-            // App name with animation
-            TweenAnimationBuilder<double>(
-              duration: const Duration(milliseconds: 1000),
-              tween: Tween(begin: 0.0, end: 1.0),
-              builder: (context, value, child) {
-                return Opacity(
-                  opacity: value,
-                  child: Transform.translate(
-                    offset: Offset(0, 20 * (1 - value)),
-                    child: Column(
-                      children: [
-                        Text(
-                          'GlobeCast',
-                          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 42,
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        Text(
-                          'Real-time Multilingual Platform',
-                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: Colors.grey[400],
-                            fontSize: 16,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: 60),
-
-            // Loading indicator
-            Column(
-              children: [
-                SizedBox(
-                  width: 30,
-                  height: 30,
-                  child: CircularProgressIndicator(
-                    color: GcbAppTheme.primary,
-                    strokeWidth: 3,
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                Text(
-                  'Initializing translation services...',
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 14,
-                  ),
-                ),
-              ],
+            SizedBox(height: 8),
+            Text(
+              'The page you are looking for does not exist.',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 16,
+              ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-// Initialization Error Screen
-class InitializationErrorScreen extends StatelessWidget {
-  final String error;
-
-  const InitializationErrorScreen({
-    Key? key,
-    required this.error,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: GcbAppTheme.background,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Error icon
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(50),
-                  border: Border.all(
-                    color: Colors.red.withOpacity(0.3),
-                    width: 2,
-                  ),
-                ),
-                child: const Icon(
-                  Icons.error_outline,
-                  size: 50,
-                  color: Colors.red,
-                ),
-              ),
-
-              const SizedBox(height: 32),
-
-              // Error title
-              Text(
-                'Initialization Failed',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-
-              const SizedBox(height: 16),
-
-              // Error message
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.red.withOpacity(0.3),
-                    width: 1,
-                  ),
-                ),
-                child: Text(
-                  error,
-                  style: TextStyle(
-                    color: Colors.grey[300],
-                    fontSize: 14,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-
-              const SizedBox(height: 32),
-
-              // Action buttons
-              Column(
-                children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        // Try to restart the app
-                        main();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: GcbAppTheme.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.refresh, color: Colors.white),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Retry Initialization',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () {
-                        // Try to continue anyway
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(builder: (_) => const MainApp()),
-                        );
-                      },
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: BorderSide(color: Colors.grey[600]!),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.arrow_forward, color: Colors.grey[400]),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Continue Anyway',
-                            style: TextStyle(
-                              color: Colors.grey[400],
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 24),
-
-              // Help text
-              Text(
-                'If this problem persists, please check your internet connection and Firebase configuration.',
-                style: TextStyle(
-                  color: Colors.grey[500],
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
         ),
       ),
     );

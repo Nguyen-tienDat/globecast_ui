@@ -1,4 +1,4 @@
-// lib/services/webrtc_mesh_meeting_service.dart (UPDATED)
+// lib/services/webrtc_mesh_meeting_service.dart (FIXED VERSION)
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -61,9 +61,8 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   // ICE Servers configuration
   final Map<String, dynamic> _iceServers = {
     'iceServers': [
-      {
-        'urls': 'stun:stun.relay.metered.ca:80',
-      },
+      {'urls': 'stun:stun.l.google.com:19302'},
+      {'urls': 'stun:stun1.l.google.com:19302'},
       {
         'urls': 'turn:global.relay.metered.ca:80',
         'username': 'daf1014df8d621757bb0b93b',
@@ -71,16 +70,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       },
       {
         'urls': 'turn:global.relay.metered.ca:80?transport=tcp',
-        'username': 'daf1014df8d621757bb0b93b',
-        'credential': '1Qumr8pcp8fzj0Fo',
-      },
-      {
-        'urls': 'turn:global.relay.metered.ca:443',
-        'username': 'daf1014df8d621757bb0b93b',
-        'credential': '1Qumr8pcp8fzj0Fo',
-      },
-      {
-        'urls': 'turns:global.relay.metered.ca:443?transport=tcp',
         'username': 'daf1014df8d621757bb0b93b',
         'credential': '1Qumr8pcp8fzj0Fo',
       },
@@ -102,7 +91,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       // Setup audio capture callbacks
       _audioCaptureService!.onAudioCaptured = (audioData, speakerId, speakerName) {
-        _whisperService?.sendAudioData(audioData, speakerId, speakerName);
+        if (_areSubtitlesEnabled && _whisperService != null) {
+          _whisperService!.sendAudioData(audioData, speakerId, speakerName);
+        }
       };
 
       _audioCaptureService!.onError = (error) {
@@ -240,13 +231,19 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         await _localRenderer!.initialize();
       }
 
-      // Get user media
+      // Get user media with better constraints
       _localStream = await navigator.mediaDevices.getUserMedia({
-        'audio': _isAudioEnabled,
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+          'sampleRate': 16000,
+        },
         'video': {
           'facingMode': 'user',
-          'width': {'ideal': 640},
-          'height': {'ideal': 480},
+          'width': {'ideal': 640, 'max': 1280},
+          'height': {'ideal': 480, 'max': 720},
+          'frameRate': {'ideal': 30, 'max': 30},
         },
       });
 
@@ -278,11 +275,17 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       // Connect to Whisper service if subtitles enabled
       if (_areSubtitlesEnabled) {
-        final whisperConnected = await _whisperService?.connect() ?? false;
-        if (whisperConnected) {
-          print('✅ Connected to Whisper service for real-time subtitles');
-        } else {
-          print('⚠️ Failed to connect to Whisper service - subtitles disabled');
+        try {
+          final whisperConnected = await _whisperService?.connect() ?? false;
+          if (whisperConnected) {
+            print('✅ Connected to Whisper service for real-time subtitles');
+          } else {
+            print('⚠️ Failed to connect to Whisper service - subtitles disabled');
+            _areSubtitlesEnabled = false;
+          }
+        } catch (e) {
+          print('⚠️ Whisper connection error: $e - continuing without subtitles');
+          _areSubtitlesEnabled = false;
         }
       }
 
@@ -393,7 +396,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     _subscriptions.add(subscription);
   }
 
-  // Create mesh connection with a peer (existing method - unchanged)
+  // Create mesh connection with a peer
   Future<void> _createMeshConnection(String peerId) async {
     try {
       print("Creating mesh connection with peer: $peerId");
@@ -552,7 +555,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Toggle video (existing method - unchanged)
+  // Toggle video
   Future<void> toggleVideo() async {
     if (_localStream == null) return;
 
@@ -579,7 +582,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Get renderer for participant (existing method - unchanged)
+  // Get renderer for participant
   RTCVideoRenderer? getRendererForParticipant(String participantId) {
     if (participantId == _userId) {
       return _localRenderer;
@@ -619,6 +622,199 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     } catch (e) {
       print('Error leaving meeting: $e');
       await _cleanup();
+    }
+  }
+
+  // Remaining methods (signaling, connection handling, etc.) - keeping existing implementation
+  void _listenForSignalingMessages() {
+    if (_meetingId == null || _userId == null) return;
+
+    print('Listening for signaling messages...');
+
+    final subscription = _firestore
+        .collection('meetings')
+        .doc(_meetingId)
+        .collection('signaling')
+        .where('to', isEqualTo: _userId)
+        .snapshots()
+        .listen((snapshot) async {
+      for (var change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final data = change.doc.data();
+          if (data != null) {
+            await _handleSignalingMessage(data);
+            await change.doc.reference.delete();
+          }
+        }
+      }
+    }, onError: (error) {
+      print('Error listening for signaling messages: $error');
+    });
+
+    _subscriptions.add(subscription);
+  }
+
+  Future<void> _handleSignalingMessage(Map<String, dynamic> message) async {
+    final String type = message['type'];
+    final String fromId = message['from'];
+
+    print('Received signaling message: $type from $fromId');
+
+    try {
+      switch (type) {
+        case 'offer':
+          await _handleOffer(fromId, message);
+          break;
+        case 'answer':
+          await _handleAnswer(fromId, message);
+          break;
+        case 'ice-candidate':
+          await _handleIceCandidate(fromId, message);
+          break;
+      }
+    } catch (e) {
+      print('Error handling signaling message: $e');
+    }
+  }
+
+  Future<void> _handleOffer(String fromId, Map<String, dynamic> message) async {
+    try {
+      if (!_peerConnections.containsKey(fromId)) {
+        await _createMeshConnection(fromId);
+      }
+
+      final pc = _peerConnections[fromId];
+      if (pc == null) return;
+
+      final offer = RTCSessionDescription(message['sdp'], message['type']);
+      await pc.setRemoteDescription(offer);
+
+      final answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await _sendSignalingMessage(fromId, {
+        'type': 'answer',
+        'sdp': answer.sdp,
+        'from': _userId,
+        'to': fromId,
+      });
+
+      print('Answer sent to $fromId');
+    } catch (e) {
+      print('Error handling offer from $fromId: $e');
+    }
+  }
+
+  Future<void> _handleAnswer(String fromId, Map<String, dynamic> message) async {
+    try {
+      final pc = _peerConnections[fromId];
+      if (pc == null) return;
+
+      final answer = RTCSessionDescription(message['sdp'], message['type']);
+      await pc.setRemoteDescription(answer);
+
+      print('Answer processed from $fromId');
+    } catch (e) {
+      print('Error handling answer from $fromId: $e');
+    }
+  }
+
+  Future<void> _handleIceCandidate(String fromId, Map<String, dynamic> message) async {
+    try {
+      final pc = _peerConnections[fromId];
+      if (pc == null) return;
+
+      final candidate = RTCIceCandidate(
+        message['candidate'],
+        message['sdpMid'],
+        message['sdpMLineIndex'],
+      );
+
+      await pc.addCandidate(candidate);
+      print('ICE candidate added from $fromId');
+    } catch (e) {
+      print('Error handling ICE candidate from $fromId: $e');
+    }
+  }
+
+  Future<void> _sendSignalingMessage(String toId, Map<String, dynamic> message) async {
+    if (_meetingId == null) return;
+
+    try {
+      await _firestore
+          .collection('meetings')
+          .doc(_meetingId)
+          .collection('signaling')
+          .add({
+        ...message,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      print('Signaling message sent successfully to $toId');
+    } catch (e) {
+      print('Error sending signaling message: $e');
+    }
+  }
+
+  Future<void> _createAndSendOffer(RTCPeerConnection pc, String peerId) async {
+    try {
+      final offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      await _sendSignalingMessage(peerId, {
+        'type': 'offer',
+        'sdp': offer.sdp,
+        'from': _userId,
+        'to': peerId,
+      });
+
+      print('Offer sent to $peerId');
+    } catch (e) {
+      print('Error creating/sending offer to $peerId: $e');
+    }
+  }
+
+  Future<void> _sendIceCandidate(String toId, RTCIceCandidate candidate) async {
+    await _sendSignalingMessage(toId, {
+      'type': 'ice-candidate',
+      'candidate': candidate.candidate,
+      'sdpMid': candidate.sdpMid,
+      'sdpMLineIndex': candidate.sdpMLineIndex,
+      'from': _userId,
+      'to': toId,
+    });
+  }
+
+  void _handleConnectionFailure(String peerId) {
+    print('Handling connection failure with $peerId');
+    // Could implement reconnection logic here
+  }
+
+  Future<void> _removeMeshConnection(String peerId) async {
+    try {
+      print('Removing mesh connection with $peerId');
+
+      final pc = _peerConnections[peerId];
+      if (pc != null) {
+        await pc.close();
+        _peerConnections.remove(peerId);
+      }
+
+      final stream = _remoteStreams[peerId];
+      if (stream != null) {
+        stream.getTracks().forEach((track) => track.stop());
+        _remoteStreams.remove(peerId);
+      }
+
+      final renderer = _remoteRenderers[peerId];
+      if (renderer != null) {
+        await renderer.dispose();
+        _remoteRenderers.remove(peerId);
+      }
+
+      notifyListeners();
+    } catch (e) {
+      print('Error removing mesh connection: $e');
     }
   }
 
@@ -679,18 +875,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       print('Error cleaning up: $e');
     }
   }
-
-  // Existing signaling methods (unchanged)
-  void _listenForSignalingMessages() { /* ... existing implementation ... */ }
-  Future<void> _handleSignalingMessage(Map<String, dynamic> message) async { /* ... existing implementation ... */ }
-  Future<void> _handleOffer(String fromId, Map<String, dynamic> message) async { /* ... existing implementation ... */ }
-  Future<void> _handleAnswer(String fromId, Map<String, dynamic> message) async { /* ... existing implementation ... */ }
-  Future<void> _handleIceCandidate(String fromId, Map<String, dynamic> message) async { /* ... existing implementation ... */ }
-  Future<void> _sendSignalingMessage(String toId, Map<String, dynamic> message) async { /* ... existing implementation ... */ }
-  Future<void> _sendIceCandidate(String toId, RTCIceCandidate candidate) async { /* ... existing implementation ... */ }
-  Future<void> _createAndSendOffer(RTCPeerConnection pc, String peerId) async { /* ... existing implementation ... */ }
-  void _handleConnectionFailure(String peerId) { /* ... existing implementation ... */ }
-  Future<void> _removeMeshConnection(String peerId) async { /* ... existing implementation ... */ }
 
   @override
   void dispose() {

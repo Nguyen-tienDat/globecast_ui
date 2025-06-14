@@ -1,8 +1,7 @@
-// lib/screens/meeting/controller.dart
+// lib/screens/meeting/controller.dart - FIXED VERSION
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
-import 'package:globecast_ui/services/whisper_service.dart';
 
 class MeetingController extends ChangeNotifier {
   // Reference to WebRTC mesh service
@@ -17,13 +16,13 @@ class MeetingController extends ChangeNotifier {
   // Navigation callback
   VoidCallback? onMeetingEnded;
 
+  // Loading states
+  bool _isToggling = false;
+
   // Constructor
   MeetingController(this._webrtcService) {
     // Listen for service changes
     _webrtcService.addListener(_syncStateFromService);
-
-    // Initialize subtitle visibility based on service state
-    _areSubtitlesVisible = _webrtcService.areSubtitlesEnabled;
   }
 
   // Getters
@@ -36,19 +35,15 @@ class MeetingController extends ChangeNotifier {
   bool get isLanguageMenuVisible => _isLanguageMenuVisible;
   bool get isHost => _webrtcService.isHost;
   bool get isMeetingActive => _webrtcService.isMeetingActive;
+  bool get isToggling => _isToggling;
   int get participantCount => _webrtcService.participants.length;
   List<MeshParticipant> get participants => _webrtcService.participants;
 
-  // Get Whisper service for subtitle functionality
-  WhisperService? get whisperService => _webrtcService.whisperService;
-
-  // Get current language settings
+  // Service status getters
+  bool get hasWhisperService => _webrtcService.whisperService != null;
+  bool get isWhisperConnected => _webrtcService.whisperService?.isConnected ?? false;
   String get userNativeLanguage => _webrtcService.userNativeLanguage;
   String get userDisplayLanguage => _webrtcService.userDisplayLanguage;
-
-  // Get subtitle service connection status
-  bool get isSubtitleServiceConnected => whisperService?.isConnected ?? false;
-  bool get isSubtitleProcessing => whisperService?.isProcessing ?? false;
 
   // Set navigation callback
   void setOnMeetingEndedCallback(VoidCallback callback) {
@@ -59,39 +54,49 @@ class MeetingController extends ChangeNotifier {
   void _syncStateFromService() {
     // Check if meeting has ended
     if (!_webrtcService.isMeetingActive && _webrtcService.meetingId == null) {
-      print('Meeting has ended, triggering navigation callback');
+      print('🏁 Meeting has ended, triggering navigation callback');
       onMeetingEnded?.call();
     }
-
-    // Sync subtitle visibility with service state
-    if (_areSubtitlesVisible != _webrtcService.areSubtitlesEnabled) {
-      _areSubtitlesVisible = _webrtcService.areSubtitlesEnabled;
-    }
-
     notifyListeners();
   }
 
   // End call method (for host)
   Future<void> endCall() async {
+    if (_isToggling) return;
+
     try {
-      print('Ending call...');
+      _isToggling = true;
+      notifyListeners();
+
+      print('🛑 Host ending call...');
       await _webrtcService.leaveMeeting();
       onMeetingEnded?.call();
     } catch (e) {
-      print('Error ending call: $e');
+      print('❌ Error ending call: $e');
       onMeetingEnded?.call();
+    } finally {
+      _isToggling = false;
+      notifyListeners();
     }
   }
 
   // Leave call method (for participants)
   Future<void> leaveCall() async {
+    if (_isToggling) return;
+
     try {
-      print('Leaving call...');
+      _isToggling = true;
+      notifyListeners();
+
+      print('🚪 Participant leaving call...');
       await _webrtcService.leaveMeeting();
       onMeetingEnded?.call();
     } catch (e) {
-      print('Error leaving call: $e');
+      print('❌ Error leaving call: $e');
       onMeetingEnded?.call();
+    } finally {
+      _isToggling = false;
+      notifyListeners();
     }
   }
 
@@ -104,27 +109,57 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
-  // Toggle controls
-  void toggleMicrophone() async {
-    await _webrtcService.toggleAudio();
-    notifyListeners();
+  // Toggle controls with error handling
+  Future<void> toggleMicrophone() async {
+    if (_isToggling) return;
+
+    try {
+      _isToggling = true;
+      notifyListeners();
+
+      print('🎙️ Toggling microphone: ${!isMicOn}');
+      await _webrtcService.toggleAudio();
+    } catch (e) {
+      print('❌ Error toggling microphone: $e');
+    } finally {
+      _isToggling = false;
+      notifyListeners();
+    }
   }
 
-  void toggleCamera() async {
-    await _webrtcService.toggleVideo();
-    notifyListeners();
+  Future<void> toggleCamera() async {
+    if (_isToggling) return;
+
+    try {
+      _isToggling = true;
+      notifyListeners();
+
+      print('📹 Toggling camera: ${!isCameraOn}');
+      await _webrtcService.toggleVideo();
+    } catch (e) {
+      print('❌ Error toggling camera: $e');
+    } finally {
+      _isToggling = false;
+      notifyListeners();
+    }
   }
 
-  void toggleSubtitlesVisibility() async {
+  void toggleSubtitlesVisibility() {
+    print('📝 Toggling subtitles visibility: ${!_areSubtitlesVisible}');
     _areSubtitlesVisible = !_areSubtitlesVisible;
 
-    // Also toggle subtitles in the WebRTC service
-    await _webrtcService.toggleSubtitles();
+    // If we have subtitle service, toggle it
+    if (hasWhisperService) {
+      _webrtcService.toggleSubtitles().catchError((error) {
+        print('❌ Error toggling subtitles service: $error');
+      });
+    }
 
     notifyListeners();
   }
 
   void toggleChat() {
+    print('💬 Toggling chat: ${!_isChatVisible}');
     _isChatVisible = !_isChatVisible;
     if (_isChatVisible) {
       _isParticipantsListVisible = false;
@@ -134,6 +169,7 @@ class MeetingController extends ChangeNotifier {
   }
 
   void toggleParticipantsList() {
+    print('👥 Toggling participants list: ${!_isParticipantsListVisible}');
     _isParticipantsListVisible = !_isParticipantsListVisible;
     if (_isParticipantsListVisible) {
       _isChatVisible = false;
@@ -143,6 +179,7 @@ class MeetingController extends ChangeNotifier {
   }
 
   void toggleLanguageMenu() {
+    print('🌍 Toggling language menu: ${!_isLanguageMenuVisible}');
     _isLanguageMenuVisible = !_isLanguageMenuVisible;
     if (_isLanguageMenuVisible) {
       _isChatVisible = false;
@@ -152,137 +189,54 @@ class MeetingController extends ChangeNotifier {
   }
 
   void closePanels() {
+    print('❌ Closing all panels');
     _isChatVisible = false;
     _isParticipantsListVisible = false;
     _isLanguageMenuVisible = false;
     notifyListeners();
   }
 
-  // Update language settings
+  // Get renderer for a participant
+  dynamic getRendererForParticipant(String participantId) {
+    try {
+      return _webrtcService.getRendererForParticipant(participantId);
+    } catch (e) {
+      print('❌ Error getting renderer for $participantId: $e');
+      return null;
+    }
+  }
+
+  // Language settings
   Future<void> updateLanguageSettings({
     required String nativeLanguage,
     required String displayLanguage,
   }) async {
     try {
+      print('🌍 Updating language settings: $nativeLanguage -> $displayLanguage');
       await _webrtcService.updateLanguageSettings(
         nativeLanguage: nativeLanguage,
         displayLanguage: displayLanguage,
       );
-
-      print('Language settings updated: $nativeLanguage → $displayLanguage');
-      notifyListeners();
     } catch (e) {
-      print('Error updating language settings: $e');
-      rethrow;
+      print('❌ Error updating language settings: $e');
     }
   }
 
-  // Get renderer for a participant
-  dynamic getRendererForParticipant(String participantId) {
-    return _webrtcService.getRendererForParticipant(participantId);
-  }
-
-  // Subtitle management methods
-  void clearSubtitles() {
-    whisperService?.clearSubtitles();
-  }
-
-  // Get subtitle for specific speaker
-  dynamic getSubtitleForSpeaker(String speakerId) {
-    return whisperService?.getSubtitleForSpeaker(speakerId);
-  }
-
-  // Test subtitle functionality
-  Future<void> testSubtitleConnection() async {
-    try {
-      print('Testing subtitle connection...');
-
-      if (whisperService == null) {
-        print('Whisper service not available');
-        return;
-      }
-
-      final connected = await whisperService!.connect();
-      if (connected) {
-        print('✅ Subtitle service connected successfully');
-      } else {
-        print('❌ Failed to connect to subtitle service');
-      }
-    } catch (e) {
-      print('Error testing subtitle connection: $e');
-    }
-  }
-
-  // Send test audio for subtitle testing
-  Future<void> sendTestAudio() async {
-    try {
-      if (whisperService == null) return;
-
-      // This would send actual audio data in a real implementation
-      // For now, we'll trigger the test through the service
-      print('Sending test audio for transcription...');
-
-      // In a real implementation, you would capture audio and send it
-      // await whisperService!.sendAudioData(audioData, userId, displayName);
-
-    } catch (e) {
-      print('Error sending test audio: $e');
-    }
-  }
-
-  // Get meeting status summary
-  Map<String, dynamic> getMeetingStatus() {
-    return {
-      'meetingId': meetingCode,
-      'participantCount': participantCount,
-      'isHost': isHost,
-      'isMeetingActive': isMeetingActive,
-      'audioEnabled': isMicOn,
-      'videoEnabled': isCameraOn,
-      'subtitlesEnabled': areSubtitlesVisible,
-      'subtitleServiceConnected': isSubtitleServiceConnected,
-      'userNativeLanguage': userNativeLanguage,
-      'userDisplayLanguage': userDisplayLanguage,
-    };
-  }
-
-  // Handle subtitle errors
-  void handleSubtitleError(String error) {
-    print('Subtitle error: $error');
-    // You could show a snackbar or handle the error in the UI
-    notifyListeners();
-  }
-
-  // Reconnect subtitle service
-  Future<void> reconnectSubtitleService() async {
-    try {
-      print('Reconnecting subtitle service...');
-
-      if (whisperService == null) return;
-
-      await whisperService!.disconnect();
-      await Future.delayed(const Duration(seconds: 2));
-
-      final connected = await whisperService!.connect();
-      if (connected) {
-        print('✅ Subtitle service reconnected');
-      } else {
-        print('❌ Failed to reconnect subtitle service');
-      }
-
-      notifyListeners();
-    } catch (e) {
-      print('Error reconnecting subtitle service: $e');
-    }
-  }
-
-  // Check if translation is needed for current user
-  bool needsTranslationForUser() {
-    return userNativeLanguage != userDisplayLanguage;
+  // Meeting info methods
+  String get meetingInfo {
+    return '''
+Meeting ID: $meetingCode
+Participants: $participantCount
+Status: ${isMeetingActive ? 'Active' : 'Inactive'}
+Audio: ${isMicOn ? 'On' : 'Off'}
+Video: ${isCameraOn ? 'On' : 'Off'}
+Subtitles: ${areSubtitlesVisible ? 'On' : 'Off'}
+Role: ${isHost ? 'Host' : 'Participant'}
+''';
   }
 
   // Get participant by ID
-  MeshParticipant? getParticipantById(String participantId) {
+  MeshParticipant? getParticipant(String participantId) {
     try {
       return participants.firstWhere((p) => p.id == participantId);
     } catch (e) {
@@ -290,28 +244,94 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
-  // Check if participant speaks different language than user's display language
-  bool participantNeedsTranslation(String participantId) {
-    final participant = getParticipantById(participantId);
-    if (participant == null) return false;
-
-    return participant.nativeLanguage != userDisplayLanguage;
+  // Get local participant
+  MeshParticipant? get localParticipant {
+    try {
+      return participants.firstWhere((p) => p.isLocal);
+    } catch (e) {
+      return null;
+    }
   }
 
-  // Get language info for display
-  String getLanguageDisplayName(String languageCode) {
-    final languages = WhisperService.supportedLanguages;
-    return languages[languageCode]?.name ?? languageCode.toUpperCase();
+  // Get remote participants
+  List<MeshParticipant> get remoteParticipants {
+    return participants.where((p) => !p.isLocal).toList();
   }
 
-  String getLanguageFlag(String languageCode) {
-    final languages = WhisperService.supportedLanguages;
-    return languages[languageCode]?.flag ?? '🌐';
+  // Check if any remote participant is speaking
+  bool get hasActiveSpeaker {
+    // This would integrate with audio level detection
+    // For now, return false as we don't have real audio analysis
+    return false;
+  }
+
+  // Get current speaker (if any)
+  MeshParticipant? get currentSpeaker {
+    // This would integrate with audio level detection
+    // For now, return null as we don't have real audio analysis
+    return null;
+  }
+
+  // Connection quality methods
+  String get connectionQuality {
+    if (!isMeetingActive) return 'Disconnected';
+
+    // This would be based on actual WebRTC stats
+    // For now, return a simple status
+    return participantCount > 1 ? 'Good' : 'Excellent';
+  }
+
+  // Debug info
+  Map<String, dynamic> get debugInfo {
+    return {
+      'meetingId': meetingCode,
+      'userId': _webrtcService.userId,
+      'isHost': isHost,
+      'isMeetingActive': isMeetingActive,
+      'participantCount': participantCount,
+      'isAudioEnabled': isMicOn,
+      'isVideoEnabled': isCameraOn,
+      'areSubtitlesVisible': areSubtitlesVisible,
+      'hasWhisperService': hasWhisperService,
+      'isWhisperConnected': isWhisperConnected,
+      'panelStates': {
+        'chat': _isChatVisible,
+        'participants': _isParticipantsListVisible,
+        'language': _isLanguageMenuVisible,
+      },
+      'isToggling': _isToggling,
+    };
+  }
+
+  // Refresh meeting state
+  Future<void> refreshMeetingState() async {
+    try {
+      print('🔄 Refreshing meeting state...');
+      // Force a state update
+      notifyListeners();
+    } catch (e) {
+      print('❌ Error refreshing meeting state: $e');
+    }
+  }
+
+  // Handle network changes
+  void onNetworkChanged(bool isConnected) {
+    print('🌐 Network changed: ${isConnected ? 'Connected' : 'Disconnected'}');
+    if (isConnected && isMeetingActive) {
+      // Try to reconnect or refresh state
+      refreshMeetingState();
+    }
+  }
+
+  // Emergency leave (force leave without cleanup)
+  void emergencyLeave() {
+    print('🚨 Emergency leave initiated');
+    onMeetingEnded?.call();
   }
 
   @override
   void dispose() {
-    print('Disposing MeetingController...');
+    print('🧹 Disposing MeetingController...');
     _webrtcService.removeListener(_syncStateFromService);
     super.dispose();
   }

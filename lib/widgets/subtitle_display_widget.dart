@@ -1,4 +1,4 @@
-// lib/widgets/subtitle_display_widget.dart
+// lib/widgets/subtitle_display_widget.dart (ENHANCED VERSION)
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/subtitle_models.dart';
@@ -9,12 +9,16 @@ class SubtitleDisplayWidget extends StatefulWidget {
   final bool isVisible;
   final double maxHeight;
   final EdgeInsets padding;
+  final bool isMinimized;
+  final VoidCallback? onToggleMinimize;
 
   const SubtitleDisplayWidget({
     Key? key,
     this.isVisible = true,
     this.maxHeight = 150.0,
     this.padding = const EdgeInsets.all(16.0),
+    this.isMinimized = false,
+    this.onToggleMinimize,
   }) : super(key: key);
 
   @override
@@ -26,8 +30,10 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
 
   late AnimationController _slideController;
   late AnimationController _fadeController;
+  late AnimationController _minimizeController;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
+  late Animation<double> _minimizeAnimation;
 
   @override
   void initState() {
@@ -40,6 +46,11 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
 
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+
+    _minimizeController = AnimationController(
+      duration: const Duration(milliseconds: 250),
       vsync: this,
     );
 
@@ -56,9 +67,21 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
       end: 1.0,
     ).animate(_fadeController);
 
+    _minimizeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _minimizeController,
+      curve: Curves.easeInOut,
+    ));
+
     if (widget.isVisible) {
       _slideController.forward();
       _fadeController.forward();
+    }
+
+    if (widget.isMinimized) {
+      _minimizeController.forward();
     }
   }
 
@@ -75,12 +98,21 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
         _fadeController.reverse();
       }
     }
+
+    if (widget.isMinimized != oldWidget.isMinimized) {
+      if (widget.isMinimized) {
+        _minimizeController.forward();
+      } else {
+        _minimizeController.reverse();
+      }
+    }
   }
 
   @override
   void dispose() {
     _slideController.dispose();
     _fadeController.dispose();
+    _minimizeController.dispose();
     super.dispose();
   }
 
@@ -94,51 +126,62 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
       position: _slideAnimation,
       child: FadeTransition(
         opacity: _fadeAnimation,
-        child: Container(
-          constraints: BoxConstraints(maxHeight: widget.maxHeight),
-          child: Consumer<WebRTCMeshMeetingService>(
-            builder: (context, webrtcService, child) {
-              final whisperService = webrtcService.whisperService;
-              final subtitles = whisperService?.currentSubtitles ?? <String, SubtitleEntry>{};
-              final isConnected = whisperService?.isConnected ?? false;
-              final isProcessing = whisperService?.isProcessing ?? false;
-              final userDisplayLanguage = webrtcService.userDisplayLanguage;
+        child: AnimatedBuilder(
+          animation: _minimizeAnimation,
+          builder: (context, child) {
+            return Container(
+              constraints: BoxConstraints(
+                maxHeight: widget.isMinimized
+                    ? 60.0
+                    : widget.maxHeight,
+              ),
+              child: Consumer<WebRTCMeshMeetingService>(
+                builder: (context, webrtcService, child) {
+                  final whisperService = webrtcService.whisperService;
+                  final subtitles = whisperService?.currentSubtitles ?? <String, SubtitleEntry>{};
+                  final isConnected = whisperService?.isConnected ?? false;
+                  final isProcessing = whisperService?.isProcessing ?? false;
+                  final userDisplayLanguage = webrtcService.userDisplayLanguage;
 
-              return Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.85),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isConnected
-                        ? GcbAppTheme.primary.withOpacity(0.4)
-                        : Colors.red.withOpacity(0.4),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
+                  return Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.85),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isConnected
+                            ? GcbAppTheme.primary.withOpacity(0.4)
+                            : Colors.red.withOpacity(0.4),
+                        width: 1.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Header with connection status
-                    _buildHeader(isConnected, isProcessing, userDisplayLanguage),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Header with connection status
+                        _buildHeader(isConnected, isProcessing, userDisplayLanguage),
 
-                    // Subtitles content
-                    if (subtitles.isEmpty)
-                      _buildEmptyState(isConnected)
-                    else
-                      _buildSubtitlesList(subtitles),
-                  ],
-                ),
-              );
-            },
-          ),
+                        // Subtitles content (hide when minimized)
+                        if (!widget.isMinimized) ...[
+                          if (subtitles.isEmpty)
+                            _buildEmptyState(isConnected)
+                          else
+                            _buildSubtitlesList(subtitles),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+            );
+          },
         ),
       ),
     );
@@ -151,9 +194,11 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
         color: isConnected
             ? GcbAppTheme.primary.withOpacity(0.15)
             : Colors.red.withOpacity(0.15),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(16),
-          topRight: Radius.circular(16),
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(16),
+          topRight: const Radius.circular(16),
+          bottomLeft: widget.isMinimized ? const Radius.circular(16) : Radius.zero,
+          bottomRight: widget.isMinimized ? const Radius.circular(16) : Radius.zero,
         ),
       ),
       child: Row(
@@ -177,7 +222,7 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
                 ? Container(
               width: 10,
               height: 10,
-              child: CircularProgressIndicator(
+              child: const CircularProgressIndicator(
                 strokeWidth: 1.5,
                 color: Colors.white,
               ),
@@ -193,6 +238,8 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
               isConnected
                   ? isProcessing
                   ? '🎤 Processing speech...'
+                  : widget.isMinimized
+                  ? '🌐 Live Translation'
                   : '🌐 Live Translation Ready'
                   : '⚠️ Connecting to translation service...',
               style: const TextStyle(
@@ -235,6 +282,26 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
                 ],
               ),
             ),
+
+          // Minimize/Maximize button
+          if (widget.onToggleMinimize != null) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: widget.onToggleMinimize,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Icon(
+                  widget.isMinimized ? Icons.expand_less : Icons.expand_more,
+                  color: Colors.white,
+                  size: 16,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -292,22 +359,25 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
     final sortedEntries = subtitles.values.toList()
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
+    // Show only the latest 3 entries to avoid clutter
+    final displayEntries = sortedEntries.take(3).toList();
+
     return Container(
       constraints: BoxConstraints(maxHeight: widget.maxHeight - 60),
       child: ListView.separated(
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        itemCount: sortedEntries.length,
+        itemCount: displayEntries.length,
         separatorBuilder: (context, index) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
-          final entry = sortedEntries[index];
-          return _buildSubtitleEntry(entry);
+          final entry = displayEntries[index];
+          return _buildSubtitleEntry(entry, index == 0);
         },
       ),
     );
   }
 
-  Widget _buildSubtitleEntry(SubtitleEntry entry) {
+  Widget _buildSubtitleEntry(SubtitleEntry entry, bool isLatest) {
     return AnimatedBuilder(
       animation: entry,
       builder: (context, child) {
@@ -316,57 +386,59 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
           tween: Tween(begin: 0.0, end: 1.0),
           builder: (context, animation, child) {
             return Transform.scale(
-              scale: 0.95 + (0.05 * animation),
+              scale: isLatest ? 0.95 + (0.05 * animation) : 1.0,
               child: Opacity(
-                opacity: animation,
+                opacity: isLatest ? animation : 0.7,
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.7),
+                    color: isLatest
+                        ? Colors.black.withOpacity(0.7)
+                        : Colors.black.withOpacity(0.4),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: entry.isTranslating
                           ? Colors.orange.withOpacity(0.4)
-                          : Colors.green.withOpacity(0.4),
-                      width: 1,
+                          : Colors.green.withOpacity(isLatest ? 0.4 : 0.2),
+                      width: isLatest ? 1 : 0.5,
                     ),
-                    boxShadow: [
+                    boxShadow: isLatest ? [
                       BoxShadow(
                         color: (entry.isTranslating ? Colors.orange : Colors.green)
                             .withOpacity(0.1),
                         blurRadius: 4,
                         offset: const Offset(0, 2),
                       ),
-                    ],
+                    ] : null,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Speaker info header
+                      // Speaker info header (compact for older entries)
                       Row(
                         children: [
                           // Speaker avatar
                           Container(
-                            width: 32,
-                            height: 32,
+                            width: isLatest ? 32 : 24,
+                            height: isLatest ? 32 : 24,
                             decoration: BoxDecoration(
                               color: GcbAppTheme.primary,
                               shape: BoxShape.circle,
-                              boxShadow: [
+                              boxShadow: isLatest ? [
                                 BoxShadow(
                                   color: GcbAppTheme.primary.withOpacity(0.3),
                                   blurRadius: 4,
                                   spreadRadius: 1,
                                 ),
-                              ],
+                              ] : null,
                             ),
                             child: Center(
                               child: Text(
                                 entry.speakerName.isNotEmpty
                                     ? entry.speakerName[0].toUpperCase()
                                     : '?',
-                                style: const TextStyle(
-                                  fontSize: 14,
+                                style: TextStyle(
+                                  fontSize: isLatest ? 14 : 12,
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -383,26 +455,27 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
                               children: [
                                 Text(
                                   entry.speakerName,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: GcbAppTheme.primary,
-                                    fontSize: 14,
+                                    fontSize: isLatest ? 14 : 12,
                                     fontWeight: FontWeight.w600,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                Text(
-                                  '${entry.originalLanguage.toUpperCase()} → ${entry.targetLanguage.toUpperCase()}',
-                                  style: TextStyle(
-                                    color: Colors.grey[400],
-                                    fontSize: 11,
+                                if (isLatest)
+                                  Text(
+                                    '${entry.originalLanguage.toUpperCase()} → ${entry.targetLanguage.toUpperCase()}',
+                                    style: TextStyle(
+                                      color: Colors.grey[400],
+                                      fontSize: 11,
+                                    ),
                                   ),
-                                ),
                               ],
                             ),
                           ),
 
-                          // Translation status
-                          if (entry.needsTranslation)
+                          // Translation status (only for latest)
+                          if (isLatest && entry.needsTranslation)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
@@ -419,7 +492,7 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   if (entry.isTranslating)
-                                    SizedBox(
+                                    const SizedBox(
                                       width: 12,
                                       height: 12,
                                       child: CircularProgressIndicator(
@@ -428,7 +501,7 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
                                       ),
                                     )
                                   else
-                                    Icon(
+                                    const Icon(
                                       Icons.check_circle,
                                       size: 12,
                                       color: Colors.green,
@@ -464,18 +537,18 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
                       // Subtitle text
                       Text(
                         entry.displayText,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white,
-                          fontSize: 15,
+                          fontSize: isLatest ? 15 : 13,
                           height: 1.4,
                           fontWeight: FontWeight.w400,
                         ),
-                        maxLines: 4,
+                        maxLines: isLatest ? 4 : 2,
                         overflow: TextOverflow.ellipsis,
                       ),
 
-                      // Confidence indicator
-                      if (entry.displayConfidence > 0)
+                      // Confidence indicator (only for latest)
+                      if (isLatest && entry.displayConfidence > 0)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Row(
@@ -524,15 +597,17 @@ class _SubtitleDisplayWidgetState extends State<SubtitleDisplayWidget>
   }
 }
 
-// Quick subtitle overlay for minimal display
+// Quick subtitle overlay for minimal display (enhanced)
 class QuickSubtitleOverlay extends StatelessWidget {
   final SubtitleEntry? currentSubtitle;
   final bool isVisible;
+  final bool showSpeakerInfo;
 
   const QuickSubtitleOverlay({
     Key? key,
     this.currentSubtitle,
     this.isVisible = true,
+    this.showSpeakerInfo = true,
   }) : super(key: key);
 
   @override
@@ -579,47 +654,48 @@ class QuickSubtitleOverlay extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Speaker info
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 14,
-                              backgroundColor: GcbAppTheme.primary,
-                              child: Text(
-                                currentSubtitle!.speakerName.isNotEmpty
-                                    ? currentSubtitle!.speakerName[0].toUpperCase()
-                                    : '?',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
+                        // Speaker info (optional)
+                        if (showSpeakerInfo)
+                          Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 14,
+                                backgroundColor: GcbAppTheme.primary,
+                                child: Text(
+                                  currentSubtitle!.speakerName.isNotEmpty
+                                      ? currentSubtitle!.speakerName[0].toUpperCase()
+                                      : '?',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                currentSubtitle!.speakerName,
-                                style: const TextStyle(
-                                  color: GcbAppTheme.primary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  currentSubtitle!.speakerName,
+                                  style: const TextStyle(
+                                    color: GcbAppTheme.primary,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (currentSubtitle!.isTranslating)
-                              SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.orange,
+                              if (currentSubtitle!.isTranslating)
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.orange,
+                                  ),
                                 ),
-                              ),
-                          ],
-                        ),
+                            ],
+                          ),
 
-                        const SizedBox(height: 8),
+                        if (showSpeakerInfo) const SizedBox(height: 8),
 
                         // Subtitle text
                         Text(
