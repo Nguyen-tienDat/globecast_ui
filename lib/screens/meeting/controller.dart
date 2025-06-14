@@ -1,4 +1,4 @@
-// lib/screens/meeting/controller.dart - FIXED VERSION
+// lib/screens/meeting/controller.dart - FIXED MISSING METHODS
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
@@ -25,7 +25,7 @@ class MeetingController extends ChangeNotifier {
     _webrtcService.addListener(_syncStateFromService);
   }
 
-  // Getters
+  // Getters - FIXED: Added missing getters
   String get meetingCode => _webrtcService.meetingId ?? 'Unknown';
   bool get isMicOn => _webrtcService.isAudioEnabled;
   bool get isCameraOn => _webrtcService.isVideoEnabled;
@@ -39,10 +39,12 @@ class MeetingController extends ChangeNotifier {
   int get participantCount => _webrtcService.participants.length;
   List<MeshParticipant> get participants => _webrtcService.participants;
 
-  // Service status getters
+  // FIXED: Added missing service status getters
   bool get hasWhisperService => _webrtcService.whisperService != null;
   bool get isWhisperConnected => _webrtcService.whisperService?.isConnected ?? false;
-  String get userNativeLanguage => _webrtcService.userNativeLanguage;
+
+  // FIXED: Added missing language getters with proper fallback
+  String get userNativeLanguage => _webrtcService.userDisplayLanguage; // In new workflow, this is same as display
   String get userDisplayLanguage => _webrtcService.userDisplayLanguage;
 
   // Set navigation callback
@@ -206,17 +208,15 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
-  // Language settings
+  // FIXED: Added missing updateLanguageSettings method
   Future<void> updateLanguageSettings({
     required String nativeLanguage,
     required String displayLanguage,
   }) async {
     try {
       print('🌍 Updating language settings: $nativeLanguage -> $displayLanguage');
-      await _webrtcService.updateLanguageSettings(
-        nativeLanguage: nativeLanguage,
-        displayLanguage: displayLanguage,
-      );
+      // In new workflow, we only use displayLanguage
+      await _webrtcService.updateDisplayLanguage(displayLanguage);
     } catch (e) {
       print('❌ Error updating language settings: $e');
     }

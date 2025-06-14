@@ -1,93 +1,509 @@
-// lib/screens/meeting/language_selection_screen.dart
+// lib/widgets/language_selection_widget.dart - NEW WORKFLOW
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/whisper_service.dart';
-import '../../services/webrtc_mesh_meeting_service.dart';
 import '../../models/subtitle_models.dart';
+import '../../services/webrtc_mesh_meeting_service.dart';
+import '../../services/whisper_service.dart';
 import '../../theme/app_theme.dart';
 
-class LanguageSelectionScreen extends StatefulWidget {
-  final String meetingId;
-  final VoidCallback? onLanguagesSelected;
+/// NEW WORKFLOW: Language Selection like YouTube Subtitles
+/// Users select what language they want to see ALL subtitles in
+/// All other participants' speech will be auto-translated to this language
+class LanguageSelectionWidget extends StatefulWidget {
+  final VoidCallback? onLanguageSelected;
+  final bool showBeforeMeeting;
 
-  const LanguageSelectionScreen({
+  const LanguageSelectionWidget({
     Key? key,
-    required this.meetingId,
-    this.onLanguagesSelected,
+    this.onLanguageSelected,
+    this.showBeforeMeeting = false,
   }) : super(key: key);
 
   @override
-  State<LanguageSelectionScreen> createState() => _LanguageSelectionScreenState();
+  State<LanguageSelectionWidget> createState() => _LanguageSelectionWidgetState();
 }
 
-class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
-  String _selectedNativeLanguage = 'en';
-  String _selectedDisplayLanguage = 'en';
+class _LanguageSelectionWidgetState extends State<LanguageSelectionWidget>
+    with SingleTickerProviderStateMixin {
+
+  late AnimationController _animationController;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _fadeAnimation;
+
+  String? _selectedLanguage;
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
 
-    // Get current language settings from WebRTC service instead of WhisperService
-    final webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
-    _selectedNativeLanguage = webrtcService.userNativeLanguage;
-    _selectedDisplayLanguage = webrtcService.userDisplayLanguage;
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    _scaleAnimation = Tween<double>(
+      begin: 0.8,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.elasticOut,
+    ));
+
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    ));
+
+    _animationController.forward();
+
+    // Get current language from service
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
+      setState(() {
+        _selectedLanguage = webrtcService.userDisplayLanguage;
+      });
+    });
   }
 
-  Future<void> _saveLanguageSettings() async {
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<WebRTCMeshMeetingService>(
+      builder: (context, webrtcService, child) {
+        return AnimatedBuilder(
+          animation: _animationController,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _scaleAnimation.value,
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: GcbAppTheme.surface,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildHeader(),
+                      _buildLanguageGrid(webrtcService),
+                      if (widget.showBeforeMeeting) _buildActionButtons(webrtcService),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: GcbAppTheme.primary.withOpacity(0.1),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: GcbAppTheme.primary.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.subtitles,
+                  color: GcbAppTheme.primary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Choose Your Subtitle Language',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Like YouTube subtitles - all speech will be translated to your language',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.grey[400],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // Info card
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Colors.blue.withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.info_outline,
+                  color: Colors.blue,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Everyone can speak their native language. You\'ll see everything translated to your chosen language.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.blue,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLanguageGrid(WebRTCMeshMeetingService webrtcService) {
+    final languages = WhisperService.supportedLanguages.entries.toList();
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Select your preferred subtitle language:',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 3.2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: languages.length,
+            itemBuilder: (context, index) {
+              final entry = languages[index];
+              final languageCode = entry.key;
+              final languageInfo = entry.value;
+              final isSelected = _selectedLanguage == languageCode;
+
+              return _buildLanguageCard(
+                languageCode: languageCode,
+                languageInfo: languageInfo,
+                isSelected: isSelected,
+                webrtcService: webrtcService,
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLanguageCard({
+    required String languageCode,
+    required LanguageInfo languageInfo,
+    required bool isSelected,
+    required WebRTCMeshMeetingService webrtcService,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _isLoading ? null : () => _selectLanguage(languageCode, webrtcService),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? GcbAppTheme.primary.withOpacity(0.2)
+                  : GcbAppTheme.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected
+                    ? GcbAppTheme.primary
+                    : Colors.grey.withOpacity(0.3),
+                width: isSelected ? 2 : 1,
+              ),
+              boxShadow: isSelected ? [
+                BoxShadow(
+                  color: GcbAppTheme.primary.withOpacity(0.3),
+                  blurRadius: 8,
+                  spreadRadius: 1,
+                ),
+              ] : null,
+            ),
+            child: Row(
+              children: [
+                // Flag
+                Text(
+                  languageInfo.flag,
+                  style: const TextStyle(fontSize: 24),
+                ),
+
+                const SizedBox(width: 12),
+
+                // Language name
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        languageInfo.name,
+                        style: TextStyle(
+                          color: isSelected ? GcbAppTheme.primary : Colors.white,
+                          fontSize: 14,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        languageCode.toUpperCase(),
+                        style: TextStyle(
+                          color: isSelected
+                              ? GcbAppTheme.primary.withOpacity(0.7)
+                              : Colors.grey[500],
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Selection indicator
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: isSelected ? GcbAppTheme.primary : Colors.transparent,
+                    border: Border.all(
+                      color: isSelected ? GcbAppTheme.primary : Colors.grey[600]!,
+                      width: 2,
+                    ),
+                    shape: BoxShape.circle,
+                  ),
+                  child: isSelected
+                      ? const Icon(
+                    Icons.check,
+                    color: Colors.white,
+                    size: 12,
+                  )
+                      : null,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButtons(WebRTCMeshMeetingService webrtcService) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: GcbAppTheme.surfaceLight,
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _isLoading ? null : () {
+                Navigator.of(context).pop();
+              },
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: BorderSide(color: Colors.grey[600]!),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                'Skip',
+                style: TextStyle(
+                  color: Colors.grey[400],
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 16),
+
+          Expanded(
+            flex: 2,
+            child: ElevatedButton(
+              onPressed: _isLoading || _selectedLanguage == null
+                  ? null
+                  : () => _confirmSelection(webrtcService),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: GcbAppTheme.primary,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: _isLoading
+                  ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+                  : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.check, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Confirm',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _selectLanguage(String languageCode, WebRTCMeshMeetingService webrtcService) async {
     if (_isLoading) return;
+
+    setState(() {
+      _selectedLanguage = languageCode;
+    });
+
+    // For in-meeting changes, apply immediately
+    if (!widget.showBeforeMeeting) {
+      setState(() {
+        _isLoading = true;
+      });
+
+      try {
+        await webrtcService.updateDisplayLanguage(languageCode);
+
+        // Show success feedback
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Subtitle language changed to ${WhisperService.supportedLanguages[languageCode]?.name}',
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+
+        widget.onLanguageSelected?.call();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+    }
+  }
+
+  Future<void> _confirmSelection(WebRTCMeshMeetingService webrtcService) async {
+    if (_selectedLanguage == null || _isLoading) return;
 
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // Access WebRTC service instead of WhisperService directly
-      final webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
+      await webrtcService.updateDisplayLanguage(_selectedLanguage!);
 
-      // Update language settings through WebRTC service
-      await webrtcService.updateLanguageSettings(
-        nativeLanguage: _selectedNativeLanguage,
-        displayLanguage: _selectedDisplayLanguage,
-      );
-
-      // Get WhisperService through WebRTC service
-      final whisperService = webrtcService.whisperService;
-
-      // Connect to Whisper server if available and not already connected
-      if (whisperService != null && !whisperService.isConnected) {
-        final connected = await whisperService.connect();
-        if (!connected) {
-          print('Warning: Failed to connect to translation service');
-          // Don't throw error, just continue without subtitles
-        }
-      }
-
-      // Show success message
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Languages updated! You speak ${WhisperService.supportedLanguages[_selectedNativeLanguage]?.name}, viewing in ${WhisperService.supportedLanguages[_selectedDisplayLanguage]?.name}',
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-
-        // Call callback if provided
-        widget.onLanguagesSelected?.call();
-
-        // Go back to meeting
+        widget.onLanguageSelected?.call();
         Navigator.of(context).pop();
       }
     } catch (e) {
@@ -107,422 +523,134 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
       }
     }
   }
+}
+
+// Quick Language Selector for in-meeting use
+class QuickLanguageSelector extends StatelessWidget {
+  final Function(String)? onLanguageChanged;
+
+  const QuickLanguageSelector({
+    Key? key,
+    this.onLanguageChanged,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: GcbAppTheme.background,
-      appBar: AppBar(
-        backgroundColor: GcbAppTheme.background,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Language Settings',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
+    return Consumer<WebRTCMeshMeetingService>(
+      builder: (context, webrtcService, child) {
+        final currentLanguage = webrtcService.userDisplayLanguage;
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: GcbAppTheme.primary.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: GcbAppTheme.primary.withOpacity(0.5),
+              width: 1,
+            ),
           ),
-        ),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header explanation
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: GcbAppTheme.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: GcbAppTheme.primary.withOpacity(0.3),
-                    width: 1,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          child: DropdownButton<String>(
+            value: currentLanguage,
+            icon: const Icon(
+              Icons.keyboard_arrow_down,
+              color: GcbAppTheme.primary,
+              size: 20,
+            ),
+            underline: const SizedBox(),
+            dropdownColor: GcbAppTheme.surface,
+            style: const TextStyle(color: Colors.white),
+            items: WhisperService.supportedLanguages.entries.map((entry) {
+              final languageCode = entry.key;
+              final languageInfo = entry.value;
+
+              return DropdownMenuItem<String>(
+                value: languageCode,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          color: GcbAppTheme.primary,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'How it works',
-                          style: TextStyle(
-                            color: GcbAppTheme.primary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '• Choose the language you speak\n• Choose the language you want to see subtitles in\n• All other participants\' speech will be translated to your preferred language',
-                      style: TextStyle(
-                        color: Colors.grey[300],
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                    ),
+                    Text(languageInfo.flag, style: const TextStyle(fontSize: 18)),
+                    const SizedBox(width: 8),
+                    Text(languageInfo.name),
                   ],
                 ),
-              ),
-
-              const SizedBox(height: 32),
-
-              // Native Language Section
-              Text(
-                'I speak',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-
-              const SizedBox(height: 8),
-
-              Text(
-                'Select the language you will be speaking in this meeting',
-                style: TextStyle(
-                  color: Colors.grey[400],
-                  fontSize: 14,
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Native Language Grid
-              _buildLanguageGrid(
-                selectedLanguage: _selectedNativeLanguage,
-                onLanguageSelected: (languageCode) {
-                  setState(() {
-                    _selectedNativeLanguage = languageCode;
-                  });
-                },
-              ),
-
-              const SizedBox(height: 32),
-
-              // Display Language Section
-              Text(
-                'I want to see subtitles in',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-
-              const SizedBox(height: 8),
-
-              Text(
-                'All other languages will be translated to this language',
-                style: TextStyle(
-                  color: Colors.grey[400],
-                  fontSize: 14,
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Display Language Grid
-              _buildLanguageGrid(
-                selectedLanguage: _selectedDisplayLanguage,
-                onLanguageSelected: (languageCode) {
-                  setState(() {
-                    _selectedDisplayLanguage = languageCode;
-                  });
-                },
-              ),
-
-              const Spacer(),
-
-              // Save Button
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _saveLanguageSettings,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: GcbAppTheme.primary,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: _isLoading
-                      ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 2,
-                    ),
-                  )
-                      : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.check, color: Colors.white),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Save & Start Translation',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+              );
+            }).toList(),
+            onChanged: (String? newLanguage) async {
+              if (newLanguage != null && newLanguage != currentLanguage) {
+                try {
+                  await webrtcService.updateDisplayLanguage(newLanguage);
+                  onLanguageChanged?.call(newLanguage);
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Error changing language: $e'),
+                        backgroundColor: Colors.red,
                       ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-            ],
+                    );
+                  }
+                }
+              }
+            },
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLanguageGrid({
-    required String selectedLanguage,
-    required Function(String) onLanguageSelected,
-  }) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 3.5,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-      ),
-      itemCount: WhisperService.supportedLanguages.length,
-      itemBuilder: (context, index) {
-        final entry = WhisperService.supportedLanguages.entries.elementAt(index);
-        final languageCode = entry.key;
-        final languageInfo = entry.value;
-        final isSelected = selectedLanguage == languageCode;
-
-        return _buildLanguageCard(
-          languageCode: languageCode,
-          languageInfo: languageInfo,
-          isSelected: isSelected,
-          onTap: () => onLanguageSelected(languageCode),
         );
       },
-    );
-  }
-
-  Widget _buildLanguageCard({
-    required String languageCode,
-    required LanguageInfo languageInfo,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? GcbAppTheme.primary.withOpacity(0.2)
-              : GcbAppTheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected
-                ? GcbAppTheme.primary
-                : Colors.transparent,
-            width: 2,
-          ),
-        ),
-        child: Row(
-          children: [
-            // Flag
-            Text(
-              languageInfo.flag,
-              style: const TextStyle(fontSize: 24),
-            ),
-
-            const SizedBox(width: 12),
-
-            // Language name
-            Expanded(
-              child: Text(
-                languageInfo.name,
-                style: TextStyle(
-                  color: isSelected ? GcbAppTheme.primary : Colors.white,
-                  fontSize: 14,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-
-            // Selection indicator
-            if (isSelected)
-              Icon(
-                Icons.check_circle,
-                color: GcbAppTheme.primary,
-                size: 20,
-              ),
-          ],
-        ),
-      ),
     );
   }
 }
 
 // Language Selection Dialog for quick access
-class LanguageSelectionDialog extends StatefulWidget {
-  final String currentNativeLanguage;
-  final String currentDisplayLanguage;
-  final Function(String, String)? onLanguagesChanged;
+class LanguageSelectionDialog extends StatelessWidget {
+  const LanguageSelectionDialog({Key? key}) : super(key: key);
 
-  const LanguageSelectionDialog({
-    Key? key,
-    required this.currentNativeLanguage,
-    required this.currentDisplayLanguage,
-    this.onLanguagesChanged,
-  }) : super(key: key);
-
-  @override
-  State<LanguageSelectionDialog> createState() => _LanguageSelectionDialogState();
-}
-
-class _LanguageSelectionDialogState extends State<LanguageSelectionDialog> {
-  late String _selectedNativeLanguage;
-  late String _selectedDisplayLanguage;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedNativeLanguage = widget.currentNativeLanguage;
-    _selectedDisplayLanguage = widget.currentDisplayLanguage;
+  static Future<void> show(BuildContext context) {
+    return showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => const LanguageSelectionDialog(),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: GcbAppTheme.surface,
-      title: Text(
-        'Quick Language Change',
-        style: TextStyle(color: Colors.white),
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+        child: const LanguageSelectionWidget(showBeforeMeeting: false),
       ),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'I speak:',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 8),
-            _buildLanguageDropdown(
-              value: _selectedNativeLanguage,
-              onChanged: (value) {
-                setState(() {
-                  _selectedNativeLanguage = value!;
-                });
-              },
-            ),
-
-            const SizedBox(height: 16),
-
-            Text(
-              'Show subtitles in:',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 8),
-            _buildLanguageDropdown(
-              value: _selectedDisplayLanguage,
-              onChanged: (value) {
-                setState(() {
-                  _selectedDisplayLanguage = value!;
-                });
-              },
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(
-            'Cancel',
-            style: TextStyle(color: Colors.grey),
-          ),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            widget.onLanguagesChanged?.call(
-              _selectedNativeLanguage,
-              _selectedDisplayLanguage,
-            );
-            Navigator.of(context).pop();
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: GcbAppTheme.primary,
-          ),
-          child: Text(
-            'Update',
-            style: TextStyle(color: Colors.white),
-          ),
-        ),
-      ],
     );
   }
+}
 
-  Widget _buildLanguageDropdown({
-    required String value,
-    required Function(String?) onChanged,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: GcbAppTheme.surfaceLight,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: DropdownButton<String>(
-        value: value,
-        isExpanded: true,
-        dropdownColor: GcbAppTheme.surface,
-        style: TextStyle(color: Colors.white),
-        underline: SizedBox(),
-        padding: EdgeInsets.symmetric(horizontal: 12),
-        items: WhisperService.supportedLanguages.entries.map((entry) {
-          final languageCode = entry.key;
-          final languageInfo = entry.value;
+// Pre-meeting Language Selection Screen
+class PreMeetingLanguageSelectionScreen extends StatelessWidget {
+  final VoidCallback? onCompleted;
 
-          return DropdownMenuItem<String>(
-            value: languageCode,
-            child: Row(
-              children: [
-                Text(languageInfo.flag, style: TextStyle(fontSize: 18)),
-                const SizedBox(width: 8),
-                Text(languageInfo.name),
-              ],
+  const PreMeetingLanguageSelectionScreen({
+    Key? key,
+    this.onCompleted,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: GcbAppTheme.background,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600),
+              child: LanguageSelectionWidget(
+                showBeforeMeeting: true,
+                onLanguageSelected: onCompleted,
+              ),
             ),
-          );
-        }).toList(),
-        onChanged: onChanged,
+          ),
+        ),
       ),
     );
   }

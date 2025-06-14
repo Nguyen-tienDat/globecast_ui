@@ -1,4 +1,4 @@
-// lib/services/whisper_service.dart
+// lib/services/whisper_service.dart - IMPROVED FOR NEW WORKFLOW
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -14,10 +14,9 @@ class WhisperService extends ChangeNotifier {
   bool _isProcessing = false;
   String _serverUrl = 'ws://127.0.0.1:8766';
 
-  // User's native language (what they speak)
-  String _userNativeLanguage = 'en';
-  // User's preferred display language (what they want to see)
-  String _userDisplayLanguage = 'en';
+  // NEW WORKFLOW: Only user's display language matters
+  // We auto-detect what each person speaks and translate to user's preferred language
+  String _userDisplayLanguage = 'en'; // What user wants to see ALL subtitles in
 
   // Current subtitles for all participants
   final Map<String, SubtitleEntry> _currentSubtitles = {};
@@ -28,15 +27,19 @@ class WhisperService extends ChangeNotifier {
   Function(String)? onError;
   Function(bool)? onConnectionChanged;
 
+  // Server connection retry logic
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 5;
+
   // Getters
   bool get isConnected => _isConnected;
   bool get isProcessing => _isProcessing;
-  String get userNativeLanguage => _userNativeLanguage;
   String get userDisplayLanguage => _userDisplayLanguage;
   Map<String, SubtitleEntry> get currentSubtitles => Map.unmodifiable(_currentSubtitles);
   List<SubtitleEntry> get subtitleHistory => List.unmodifiable(_subtitleHistory);
 
-  // Supported languages
+  // Supported languages with enhanced metadata
   static const Map<String, LanguageInfo> supportedLanguages = {
     'en': LanguageInfo(code: 'en', name: 'English', flag: '🇺🇸'),
     'vi': LanguageInfo(code: 'vi', name: 'Tiếng Việt', flag: '🇻🇳'),
@@ -52,9 +55,14 @@ class WhisperService extends ChangeNotifier {
     'hi': LanguageInfo(code: 'hi', name: 'हिन्दी', flag: '🇮🇳'),
     'pt': LanguageInfo(code: 'pt', name: 'Português', flag: '🇧🇷'),
     'it': LanguageInfo(code: 'it', name: 'Italiano', flag: '🇮🇹'),
+    'nl': LanguageInfo(code: 'nl', name: 'Nederlands', flag: '🇳🇱'),
+    'sv': LanguageInfo(code: 'sv', name: 'Svenska', flag: '🇸🇪'),
+    'no': LanguageInfo(code: 'no', name: 'Norsk', flag: '🇳🇴'),
+    'da': LanguageInfo(code: 'da', name: 'Dansk', flag: '🇩🇰'),
+    'fi': LanguageInfo(code: 'fi', name: 'Suomi', flag: '🇫🇮'),
   };
 
-  // Initialize connection to Whisper server
+  // Initialize connection to Whisper server with auto-retry
   Future<bool> connect({String? serverUrl}) async {
     try {
       if (_isConnected) await disconnect();
@@ -66,7 +74,7 @@ class WhisperService extends ChangeNotifier {
 
       // Wait for connection or timeout
       final completer = Completer<bool>();
-      Timer(const Duration(seconds: 5), () {
+      Timer(const Duration(seconds: 10), () {
         if (!completer.isCompleted) {
           completer.complete(false);
         }
@@ -96,6 +104,7 @@ class WhisperService extends ChangeNotifier {
 
       if (connected) {
         _isConnected = true;
+        _reconnectAttempts = 0;
         print('✅ Connected to Whisper server');
         _sendConnectionMessage();
         onConnectionChanged?.call(true);
@@ -118,6 +127,9 @@ class WhisperService extends ChangeNotifier {
       _isConnected = false;
       _isProcessing = false;
 
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+
       await _subscription?.cancel();
       _subscription = null;
 
@@ -134,17 +146,19 @@ class WhisperService extends ChangeNotifier {
     }
   }
 
-  // Send connection message with capabilities
+  // Send connection message with NEW WORKFLOW capabilities
   void _sendConnectionMessage() {
     if (!_isConnected) return;
 
     final message = {
-      'type': 'test',
-      'message': 'Flutter client connected',
+      'type': 'connection_setup',
+      'message': 'Flutter GlobeCast client connected',
+      'workflow': 'youtube_subtitles', // NEW: Indicate our workflow
       'capabilities': {
-        'native_language': _userNativeLanguage,
-        'display_language': _userDisplayLanguage,
+        'user_display_language': _userDisplayLanguage,
+        'auto_detect_source': true, // We want to auto-detect what each person speaks
         'supported_languages': supportedLanguages.keys.toList(),
+        'real_time_translation': true,
       },
       'timestamp': DateTime.now().toIso8601String(),
     };
@@ -152,22 +166,36 @@ class WhisperService extends ChangeNotifier {
     _sendMessage(message);
   }
 
-  // Set user languages
-  void setUserLanguages({
-    required String nativeLanguage,
-    required String displayLanguage,
-  }) {
-    _userNativeLanguage = nativeLanguage;
+  // NEW WORKFLOW: Set user's preferred display language
+  void setUserDisplayLanguage(String displayLanguage) {
     _userDisplayLanguage = displayLanguage;
 
-    print('🌐 User languages set: Native=$nativeLanguage, Display=$displayLanguage');
+    print('🌐 User display language set to: $displayLanguage');
+    print('🔄 All speech will now be translated to: ${supportedLanguages[displayLanguage]?.name}');
 
     // Clear existing subtitles when language changes
     _currentSubtitles.clear();
     notifyListeners();
+
+    // Notify server of language change
+    if (_isConnected) {
+      _sendMessage({
+        'type': 'language_preference_update',
+        'user_display_language': displayLanguage,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+    }
   }
 
-  // Send audio data for transcription
+  // Legacy method for compatibility - now just calls setUserDisplayLanguage
+  void setUserLanguages({
+    required String nativeLanguage, // Ignored in new workflow
+    required String displayLanguage,
+  }) {
+    setUserDisplayLanguage(displayLanguage);
+  }
+
+  // Send audio data for transcription with speaker info
   Future<void> sendAudioData(Uint8List audioData, String speakerId, String speakerName) async {
     if (!_isConnected) {
       print('❌ Cannot send audio: not connected to Whisper server');
@@ -178,35 +206,29 @@ class WhisperService extends ChangeNotifier {
       _isProcessing = true;
       notifyListeners();
 
-      // Send audio data as binary
+      // Send metadata first
+      final metadata = {
+        'type': 'audio_metadata',
+        'speaker_id': speakerId,
+        'speaker_name': speakerName,
+        'target_language': _userDisplayLanguage, // NEW: Always translate to user's language
+        'auto_detect_source': true, // NEW: Auto-detect what the speaker is saying
+        'audio_size': audioData.length,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      _sendMessage(metadata);
+
+      // Then send audio data as binary
       _channel!.sink.add(audioData);
 
-      print('🎵 Sent audio data: ${audioData.length} bytes for $speakerName');
+      print('🎵 Sent audio data: ${audioData.length} bytes for $speakerName (→ $_userDisplayLanguage)');
     } catch (e) {
       print('❌ Error sending audio data: $e');
       onError?.call('Failed to send audio: $e');
       _isProcessing = false;
       notifyListeners();
     }
-  }
-
-  // Request translation for existing text
-  Future<void> requestTranslation({
-    required String text,
-    required String sourceLanguage,
-    String? targetLanguage,
-  }) async {
-    if (!_isConnected) return;
-
-    final message = {
-      'type': 'translate_request',
-      'text': text,
-      'source_lang': sourceLanguage,
-      'target_lang': targetLanguage ?? _userDisplayLanguage,
-      'timestamp': DateTime.now().toIso8601String(),
-    };
-
-    _sendMessage(message);
   }
 
   // Handle incoming messages from server
@@ -225,17 +247,17 @@ class WhisperService extends ChangeNotifier {
       print('📨 Received message type: $type');
 
       switch (type) {
-        case 'connection':
+        case 'connection_acknowledged':
           _handleConnectionMessage(message);
           break;
-        case 'transcription':
+        case 'transcription_result':
           _handleTranscriptionResult(message);
           break;
-        case 'translation_result':
-          _handleTranslationResult(message);
+        case 'translation_complete':
+          _handleTranslationComplete(message);
           break;
-        case 'test_response':
-          print('✅ Test response: ${message['message']}');
+        case 'processing_status':
+          _handleProcessingStatus(message);
           break;
         case 'error':
           _handleErrorMessage(message);
@@ -248,27 +270,28 @@ class WhisperService extends ChangeNotifier {
     }
   }
 
-  // Handle connection message
+  // Handle connection acknowledgment
   void _handleConnectionMessage(Map<String, dynamic> message) {
-    print('🤝 Connection established: ${message['message']}');
-    final capabilities = message['capabilities'];
+    print('🤝 Connection acknowledged: ${message['message']}');
+    final capabilities = message['server_capabilities'];
     if (capabilities != null) {
       print('🎯 Server capabilities: $capabilities');
     }
   }
 
-  // Handle transcription result
+  // Handle transcription result with NEW WORKFLOW
   void _handleTranscriptionResult(Map<String, dynamic> message) {
     try {
       final String text = message['text'] ?? '';
-      final String detectedLanguage = message['language'] ?? 'unknown';
+      final String detectedLanguage = message['detected_language'] ?? 'unknown';
       final double confidence = ((message['confidence'] ?? 0.0) as num).toDouble();
       final String speakerId = message['speaker_id'] ?? 'unknown';
       final String speakerName = message['speaker_name'] ?? 'Unknown Speaker';
+      final bool isFinal = message['is_final'] ?? true;
 
       if (text.trim().isEmpty) return;
 
-      print('📝 Transcription: [$detectedLanguage] $text (confidence: ${(confidence * 100).toStringAsFixed(1)}%)');
+      print('📝 Transcription (${detectedLanguage}): $text (confidence: ${(confidence * 100).toStringAsFixed(1)}%)');
 
       // Create subtitle entry
       final subtitle = SubtitleEntry(
@@ -280,24 +303,22 @@ class WhisperService extends ChangeNotifier {
         targetLanguage: _userDisplayLanguage,
         confidence: confidence,
         timestamp: DateTime.now(),
-        isFinal: message['is_final'] ?? true,
+        isFinal: isFinal,
       );
 
-      // If detected language is different from user's display language, request translation
+      // NEW WORKFLOW: Check if translation is needed
       if (detectedLanguage != _userDisplayLanguage) {
-        requestTranslation(
-          text: text,
-          sourceLanguage: detectedLanguage,
-          targetLanguage: _userDisplayLanguage,
-        );
-
-        // Store with placeholder translation
+        // Different language detected - translation needed
         subtitle.translatedText = 'Translating...';
         subtitle.isTranslating = true;
+
+        print('🌍 Requesting translation: $detectedLanguage → $_userDisplayLanguage');
+        _requestTranslation(text, detectedLanguage, speakerId);
       } else {
-        // Same language, no translation needed
+        // Same language - no translation needed
         subtitle.translatedText = text;
         subtitle.isTranslating = false;
+        subtitle.translationConfidence = confidence;
       }
 
       // Update current subtitles and history
@@ -305,7 +326,7 @@ class WhisperService extends ChangeNotifier {
       _subtitleHistory.add(subtitle);
 
       // Keep history reasonable size
-      if (_subtitleHistory.length > 100) {
+      if (_subtitleHistory.length > 50) {
         _subtitleHistory.removeAt(0);
       }
 
@@ -320,66 +341,119 @@ class WhisperService extends ChangeNotifier {
     }
   }
 
-  // Handle translation result
-  void _handleTranslationResult(Map<String, dynamic> message) {
+  // Handle translation completion
+  void _handleTranslationComplete(Map<String, dynamic> message) {
     try {
       final String originalText = message['original_text'] ?? '';
       final String translatedText = message['translated_text'] ?? '';
-      final String targetLanguage = message['target_language'] ?? '';
+      final String speakerId = message['speaker_id'] ?? '';
       final double confidence = ((message['confidence'] ?? 0.0) as num).toDouble();
 
-      print('🌍 Translation: $originalText → $translatedText');
+      print('🌍 Translation complete: $originalText → $translatedText');
 
-      // Find matching subtitle entry and update translation
-      for (var entry in _currentSubtitles.values) {
-        if (entry.originalText == originalText && entry.isTranslating) {
-          entry.translatedText = translatedText;
-          entry.isTranslating = false;
-          entry.translationConfidence = confidence;
-          break;
+      // Find and update the corresponding subtitle entry
+      final subtitle = _currentSubtitles[speakerId];
+      if (subtitle != null && subtitle.originalText == originalText && subtitle.isTranslating) {
+        subtitle.translatedText = translatedText;
+        subtitle.isTranslating = false;
+        subtitle.translationConfidence = confidence;
+
+        // Also update in history
+        for (var entry in _subtitleHistory.reversed) {
+          if (entry.speakerId == speakerId &&
+              entry.originalText == originalText &&
+              entry.isTranslating) {
+            entry.translatedText = translatedText;
+            entry.isTranslating = false;
+            entry.translationConfidence = confidence;
+            break;
+          }
         }
-      }
 
-      // Also update in history
-      for (var entry in _subtitleHistory.reversed) {
-        if (entry.originalText == originalText && entry.isTranslating) {
-          entry.translatedText = translatedText;
-          entry.isTranslating = false;
-          entry.translationConfidence = confidence;
-          break;
-        }
+        notifyListeners();
       }
-
-      notifyListeners();
     } catch (e) {
       print('❌ Error handling translation: $e');
     }
   }
 
+  // Handle processing status updates
+  void _handleProcessingStatus(Map<String, dynamic> message) {
+    final bool isProcessing = message['is_processing'] ?? false;
+    final String status = message['status'] ?? 'unknown';
+
+    _isProcessing = isProcessing;
+    print('⚙️ Processing status: $status (processing: $isProcessing)');
+    notifyListeners();
+  }
+
   // Handle error message
   void _handleErrorMessage(Map<String, dynamic> message) {
     final String errorMsg = message['message'] ?? 'Unknown error';
-    print('❌ Server error: $errorMsg');
+    final String errorType = message['error_type'] ?? 'general';
+
+    print('❌ Server error ($errorType): $errorMsg');
     onError?.call(errorMsg);
     _isProcessing = false;
     notifyListeners();
   }
 
-  // Handle connection error
+  // Request translation for specific text
+  void _requestTranslation(String text, String sourceLanguage, String speakerId) {
+    if (!_isConnected) return;
+
+    final message = {
+      'type': 'translation_request',
+      'text': text,
+      'source_language': sourceLanguage,
+      'target_language': _userDisplayLanguage,
+      'speaker_id': speakerId,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+
+    _sendMessage(message);
+  }
+
+  // Handle connection error with auto-retry
   void _handleConnectionError(dynamic error) {
     _isConnected = false;
     _isProcessing = false;
     onConnectionChanged?.call(false);
     onError?.call('Connection error: $error');
     notifyListeners();
+
+    _attemptReconnect();
   }
 
-  // Handle connection closed
+  // Handle connection closed with auto-retry
   void _handleConnectionClosed() {
     _isConnected = false;
     _isProcessing = false;
     onConnectionChanged?.call(false);
     notifyListeners();
+
+    _attemptReconnect();
+  }
+
+  // Auto-reconnect logic
+  void _attemptReconnect() {
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      print('❌ Max reconnection attempts reached');
+      return;
+    }
+
+    _reconnectAttempts++;
+    final delay = Duration(seconds: _reconnectAttempts * 2); // Exponential backoff
+
+    print('🔄 Attempting reconnection in ${delay.inSeconds}s (attempt $_reconnectAttempts/$_maxReconnectAttempts)');
+
+    _reconnectTimer = Timer(delay, () async {
+      print('🔄 Reconnecting to Whisper server...');
+      final success = await connect();
+      if (!success) {
+        _attemptReconnect();
+      }
+    });
   }
 
   // Send message to server
@@ -406,9 +480,39 @@ class WhisperService extends ChangeNotifier {
     return _currentSubtitles[speakerId];
   }
 
+  // Get latest subtitle across all speakers
+  SubtitleEntry? getLatestSubtitle() {
+    if (_subtitleHistory.isEmpty) return null;
+    return _subtitleHistory.last;
+  }
+
+  // Get subtitles in chronological order
+  List<SubtitleEntry> getRecentSubtitles({int limit = 10}) {
+    final recentSubtitles = _subtitleHistory.reversed.take(limit).toList();
+    return recentSubtitles.reversed.toList();
+  }
+
+  // Check if service is ready
+  bool get isReady => _isConnected && !_isProcessing;
+
+  // Get connection status info
+  Map<String, dynamic> getConnectionInfo() {
+    return {
+      'isConnected': _isConnected,
+      'isProcessing': _isProcessing,
+      'userDisplayLanguage': _userDisplayLanguage,
+      'supportedLanguagesCount': supportedLanguages.length,
+      'currentSubtitlesCount': _currentSubtitles.length,
+      'historyCount': _subtitleHistory.length,
+      'reconnectAttempts': _reconnectAttempts,
+      'serverUrl': _serverUrl,
+    };
+  }
+
   @override
   void dispose() {
     print('🧹 Disposing WhisperService');
+    _reconnectTimer?.cancel();
     disconnect();
     super.dispose();
   }

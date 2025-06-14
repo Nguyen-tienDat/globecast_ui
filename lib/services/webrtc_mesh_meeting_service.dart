@@ -1,4 +1,4 @@
-// lib/services/webrtc_mesh_meeting_service.dart (FIXED VERSION)
+// lib/services/webrtc_mesh_meeting_service.dart - FIXED MEDIA STREAM VERSION
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -12,7 +12,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   // Firebase instances
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Whisper and Audio services
+  // Services
   WhisperService? _whisperService;
   AudioCaptureService? _audioCaptureService;
 
@@ -32,10 +32,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   bool _isAudioEnabled = true;
   bool _isVideoEnabled = true;
 
-  // Subtitle settings
-  bool _areSubtitlesEnabled = true;
-  String _userNativeLanguage = 'en';
-  String _userDisplayLanguage = 'en';
+  // Language preferences - NEW WORKFLOW
+  String _userDisplayLanguage = 'en'; // Language user wants to see subtitles in
+  bool _subtitlesEnabled = true;
 
   // Participants
   final List<MeshParticipant> _participants = [];
@@ -50,19 +49,22 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   bool get isMeetingActive => _isMeetingActive;
   bool get isAudioEnabled => _isAudioEnabled;
   bool get isVideoEnabled => _isVideoEnabled;
-  bool get areSubtitlesEnabled => _areSubtitlesEnabled;
-  String get userNativeLanguage => _userNativeLanguage;
+  bool get subtitlesEnabled => _subtitlesEnabled;
   String get userDisplayLanguage => _userDisplayLanguage;
   List<MeshParticipant> get participants => List.unmodifiable(_participants);
   RTCVideoRenderer? get localRenderer => _localRenderer;
   WhisperService? get whisperService => _whisperService;
   AudioCaptureService? get audioCaptureService => _audioCaptureService;
 
-  // ICE Servers configuration
+  // Enhanced ICE Servers configuration with fallbacks
   final Map<String, dynamic> _iceServers = {
     'iceServers': [
+      // Google STUN servers (free and reliable)
       {'urls': 'stun:stun.l.google.com:19302'},
       {'urls': 'stun:stun1.l.google.com:19302'},
+      {'urls': 'stun:stun2.l.google.com:19302'},
+
+      // Metered TURN servers (your existing config)
       {
         'urls': 'turn:global.relay.metered.ca:80',
         'username': 'daf1014df8d621757bb0b93b',
@@ -70,6 +72,16 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       },
       {
         'urls': 'turn:global.relay.metered.ca:80?transport=tcp',
+        'username': 'daf1014df8d621757bb0b93b',
+        'credential': '1Qumr8pcp8fzj0Fo',
+      },
+      {
+        'urls': 'turn:global.relay.metered.ca:443',
+        'username': 'daf1014df8d621757bb0b93b',
+        'credential': '1Qumr8pcp8fzj0Fo',
+      },
+      {
+        'urls': 'turns:global.relay.metered.ca:443?transport=tcp',
         'username': 'daf1014df8d621757bb0b93b',
         'credential': '1Qumr8pcp8fzj0Fo',
       },
@@ -83,7 +95,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       // Generate clean user ID compatible with existing database
       _userId ??= 'USR${const Uuid().v4().replaceAll('-', '').substring(0, 8)}';
 
-      // Initialize Whisper service
+      // Initialize Whisper service for translation
       _whisperService = WhisperService();
 
       // Initialize Audio capture service
@@ -91,7 +103,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       // Setup audio capture callbacks
       _audioCaptureService!.onAudioCaptured = (audioData, speakerId, speakerName) {
-        if (_areSubtitlesEnabled && _whisperService != null) {
+        if (_subtitlesEnabled && _whisperService != null) {
           _whisperService!.sendAudioData(audioData, speakerId, speakerName);
         }
       };
@@ -100,7 +112,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         print('Audio capture error: $error');
       };
 
-      // Setup Whisper service callbacks
+      // Setup Whisper service callbacks with new workflow
       _whisperService!.onError = (error) {
         print('Whisper service error: $error');
       };
@@ -110,7 +122,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         notifyListeners();
       };
 
-      print('WebRTC Mesh Service with Whisper initialized: $_userId');
+      print('WebRTC Mesh Service initialized: $_userId');
       notifyListeners();
     } catch (e) {
       print('Error initializing service: $e');
@@ -118,24 +130,29 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Set user details and language preferences
+  // NEW: Set user display language preference (like YouTube subtitles)
+  void setUserDisplayLanguage(String languageCode) {
+    _userDisplayLanguage = languageCode;
+
+    // Update Whisper service to translate everything to this language
+    _whisperService?.setUserLanguages(
+      nativeLanguage: 'auto', // Auto-detect what each person speaks
+      displayLanguage: languageCode, // Always translate to user's preferred language
+    );
+
+    print('🌍 User display language set to: $languageCode');
+    notifyListeners();
+  }
+
+  // Set user details
   void setUserDetails({
     required String displayName,
     String? userId,
-    String? nativeLanguage,
     String? displayLanguage,
   }) {
     _displayName = displayName;
     if (userId != null) _userId = userId;
-    if (nativeLanguage != null) _userNativeLanguage = nativeLanguage;
-    if (displayLanguage != null) _userDisplayLanguage = displayLanguage;
-
-    // Update Whisper service with language settings
-    _whisperService?.setUserLanguages(
-      nativeLanguage: _userNativeLanguage,
-      displayLanguage: _userDisplayLanguage,
-    );
-
+    if (displayLanguage != null) setUserDisplayLanguage(displayLanguage);
     notifyListeners();
   }
 
@@ -152,7 +169,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         throw Exception('Meeting topic cannot be empty');
       }
 
-      // Create meeting document
+      // Create meeting document with language support
       await _firestore.collection('meetings').doc(meetingId).set({
         'meetingId': meetingId,
         'topic': topic,
@@ -161,15 +178,11 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         'createdAt': FieldValue.serverTimestamp(),
         'participantCount': 0,
         'password': '123',
-        'translationLanguages': {
-          '0': 'english',
-          '1': 'vietnamese',
-        },
         'topology': 'mesh',
         'maxParticipants': 6,
-        // Subtitle settings
-        'subtitlesEnabled': _areSubtitlesEnabled,
-        'primaryLanguage': _userNativeLanguage,
+        // New language settings
+        'subtitlesEnabled': _subtitlesEnabled,
+        'supportedLanguages': ['en', 'vi', 'zh', 'ja', 'ko', 'fr', 'de', 'es'], // Add more as needed
       });
 
       await _setupLocalStream();
@@ -220,50 +233,165 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Setup local media stream
+  // FIXED: Setup local media stream with better error handling
   Future<void> _setupLocalStream() async {
     try {
       print('Setting up local stream...');
 
-      // Initialize local renderer
+      // Initialize local renderer first
       if (_localRenderer == null) {
         _localRenderer = RTCVideoRenderer();
         await _localRenderer!.initialize();
+        print('✅ Local renderer initialized');
       }
 
-      // Get user media with better constraints
-      _localStream = await navigator.mediaDevices.getUserMedia({
+      // Check if we already have a stream
+      if (_localStream != null) {
+        print('🔄 Disposing existing local stream...');
+        _localStream!.getTracks().forEach((track) {
+          track.stop();
+        });
+        _localStream = null;
+      }
+
+      // Get user media with progressive fallback
+      _localStream = await _getUserMediaWithFallback();
+
+      if (_localStream != null) {
+        _localRenderer!.srcObject = _localStream;
+
+        // Start audio capture for subtitles if enabled
+        if (_subtitlesEnabled && _userId != null) {
+          await _audioCaptureService?.startLocalCapture(
+            _localStream!,
+            _userId!,
+            _displayName,
+          );
+        }
+
+        print('✅ Local stream setup complete');
+        notifyListeners();
+      } else {
+        throw Exception('Failed to get media stream');
+      }
+    } catch (e) {
+      print('❌ Error setting up local stream: $e');
+      throw Exception('Could not access camera or microphone: $e');
+    }
+  }
+
+  // FIXED: Progressive fallback for getUserMedia
+  Future<MediaStream?> _getUserMediaWithFallback() async {
+    // List of constraints to try, from most preferred to fallback
+    final List<Map<String, dynamic>> constraintsList = [
+      // High quality
+      {
         'audio': {
           'echoCancellation': true,
           'noiseSuppression': true,
           'autoGainControl': true,
-          'sampleRate': 16000,
+          'sampleRate': 48000,
+        },
+        'video': {
+          'facingMode': 'user',
+          'width': {'ideal': 1280, 'max': 1920},
+          'height': {'ideal': 720, 'max': 1080},
+          'frameRate': {'ideal': 30, 'max': 60},
+        },
+      },
+      // Medium quality
+      {
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
         },
         'video': {
           'facingMode': 'user',
           'width': {'ideal': 640, 'max': 1280},
           'height': {'ideal': 480, 'max': 720},
-          'frameRate': {'ideal': 30, 'max': 30},
+          'frameRate': {'ideal': 30},
         },
-      });
+      },
+      // Basic quality
+      {
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+        },
+        'video': {
+          'width': {'ideal': 320, 'max': 640},
+          'height': {'ideal': 240, 'max': 480},
+          'frameRate': {'ideal': 15, 'max': 30},
+        },
+      },
+      // Audio only fallback
+      {
+        'audio': {
+          'echoCancellation': true,
+        },
+        'video': false,
+      },
+      // Minimal constraints
+      {
+        'audio': true,
+        'video': true,
+      },
+      // Audio only minimal
+      {
+        'audio': true,
+        'video': false,
+      },
+    ];
 
-      _localRenderer!.srcObject = _localStream;
+    for (int i = 0; i < constraintsList.length; i++) {
+      try {
+        final constraints = constraintsList[i];
+        print('🔄 Trying media constraints ${i + 1}/${constraintsList.length}: ${constraints['video'] != false ? 'Video+Audio' : 'Audio only'}');
 
-      // Start audio capture for subtitles if enabled
-      if (_areSubtitlesEnabled && _localStream != null && _userId != null) {
-        await _audioCaptureService?.startLocalCapture(
-          _localStream!,
-          _userId!,
-          _displayName,
-        );
+        final stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        if (stream.getTracks().isNotEmpty) {
+          final audioTracks = stream.getAudioTracks();
+          final videoTracks = stream.getVideoTracks();
+
+          print('✅ Media stream obtained:');
+          print('   Audio tracks: ${audioTracks.length}');
+          print('   Video tracks: ${videoTracks.length}');
+
+          // Update internal state based on what we actually got
+          _isAudioEnabled = audioTracks.isNotEmpty;
+          _isVideoEnabled = videoTracks.isNotEmpty;
+
+          return stream;
+        }
+      } catch (e) {
+        print('❌ Constraints ${i + 1} failed: ${e.toString()}');
+
+        // Log specific error types for debugging
+        if (e.toString().contains('NotFoundError') || e.toString().contains('DevicesNotFoundError')) {
+          print('   📍 Device not found - trying next constraint');
+        } else if (e.toString().contains('NotAllowedError') || e.toString().contains('PermissionDeniedError')) {
+          print('   🚫 Permission denied');
+          if (i < constraintsList.length - 1) {
+            print('   🔄 Trying with reduced permissions...');
+          } else {
+            throw Exception('Permission denied to access camera/microphone');
+          }
+        } else if (e.toString().contains('NotReadableError') || e.toString().contains('TrackStartError')) {
+          print('   🔒 Device already in use');
+        } else if (e.toString().contains('OverconstrainedError') || e.toString().contains('ConstraintNotSatisfiedError')) {
+          print('   ⚠️ Constraints not satisfied - trying simpler constraints');
+        }
+
+        // If this is the last attempt, throw the error
+        if (i == constraintsList.length - 1) {
+          throw e;
+        }
       }
-
-      print('Local stream setup complete');
-      notifyListeners();
-    } catch (e) {
-      print('Error setting up local stream: $e');
-      throw Exception('Could not access camera or microphone: $e');
     }
+
+    throw Exception('Failed to obtain media stream with any constraints');
   }
 
   // Join the mesh network
@@ -274,18 +402,18 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       _isMeetingActive = true;
 
       // Connect to Whisper service if subtitles enabled
-      if (_areSubtitlesEnabled) {
+      if (_subtitlesEnabled) {
         try {
           final whisperConnected = await _whisperService?.connect() ?? false;
           if (whisperConnected) {
             print('✅ Connected to Whisper service for real-time subtitles');
           } else {
             print('⚠️ Failed to connect to Whisper service - subtitles disabled');
-            _areSubtitlesEnabled = false;
+            _subtitlesEnabled = false;
           }
         } catch (e) {
           print('⚠️ Whisper connection error: $e - continuing without subtitles');
-          _areSubtitlesEnabled = false;
+          _subtitlesEnabled = false;
         }
       }
 
@@ -302,7 +430,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Add self as participant
+  // Add self as participant with language preferences
   Future<void> _addSelfAsParticipant() async {
     if (_meetingId == null || _userId == null) return;
 
@@ -322,10 +450,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         'isVideoEnabled': _isVideoEnabled,
         'connectionType': 'mesh',
         'peerConnections': [],
-        // Language preferences
-        'nativeLanguage': _userNativeLanguage,
-        'displayLanguage': _userDisplayLanguage,
-        'subtitlesEnabled': _areSubtitlesEnabled,
+        // NEW: Language preferences for this participant
+        'displayLanguage': _userDisplayLanguage, // What this user wants to see
+        'subtitlesEnabled': _subtitlesEnabled,
       });
 
       await _firestore.collection('meetings').doc(_meetingId).update({
@@ -367,7 +494,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
           isAudioEnabled: data['isAudioEnabled'] ?? true,
           isVideoEnabled: data['isVideoEnabled'] ?? true,
           isLocal: participantId == _userId,
-          nativeLanguage: data['nativeLanguage'] ?? 'en',
           displayLanguage: data['displayLanguage'] ?? 'en',
         );
 
@@ -396,10 +522,16 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     _subscriptions.add(subscription);
   }
 
-  // Create mesh connection with a peer
+  // Create mesh connection with a peer - FIXED
   Future<void> _createMeshConnection(String peerId) async {
     try {
       print("Creating mesh connection with peer: $peerId");
+
+      // Check if we have local stream
+      if (_localStream == null) {
+        print('⚠️ No local stream available for peer connection');
+        return;
+      }
 
       final pc = await createPeerConnection(_iceServers);
       _peerConnections[peerId] = pc;
@@ -408,10 +540,10 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       await renderer.initialize();
       _remoteRenderers[peerId] = renderer;
 
-      if (_localStream != null) {
-        _localStream!.getTracks().forEach((track) {
-          pc.addTrack(track, _localStream!);
-        });
+      // Add local stream tracks to peer connection
+      for (var track in _localStream!.getTracks()) {
+        await pc.addTrack(track, _localStream!);
+        print('📡 Added ${track.kind} track to peer connection with $peerId');
       }
 
       _setupPeerConnectionEventHandlers(pc, peerId);
@@ -421,29 +553,34 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Setup peer connection event handlers (updated to handle remote audio capture)
+  // Setup peer connection event handlers with better logging
   void _setupPeerConnectionEventHandlers(RTCPeerConnection pc, String peerId) {
     pc.onIceConnectionState = (state) {
-      print('ICE connection state with $peerId: $state');
+      print('🧊 ICE connection state with $peerId: $state');
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
           state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
-        print('Connection with $peerId failed or disconnected');
+        print('💔 Connection with $peerId failed or disconnected');
         _handleConnectionFailure(peerId);
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+        print('✅ ICE connection established with $peerId');
       }
     };
 
     pc.onIceCandidate = (candidate) async {
-      await _sendIceCandidate(peerId, candidate);
+      if (candidate.candidate != null) {
+        await _sendIceCandidate(peerId, candidate);
+      }
     };
 
     pc.onTrack = (event) {
+      print('📺 Received track from $peerId: ${event.track?.kind}');
       if (event.streams.isNotEmpty) {
         final stream = event.streams[0];
         _remoteStreams[peerId] = stream;
         _remoteRenderers[peerId]?.srcObject = stream;
 
         // Add remote stream for audio capture if subtitles enabled
-        if (_areSubtitlesEnabled) {
+        if (_subtitlesEnabled) {
           final participant = _participants.firstWhere(
                 (p) => p.id == peerId,
             orElse: () => MeshParticipant(id: peerId, name: 'Unknown'),
@@ -451,21 +588,28 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
           _audioCaptureService?.addRemoteStream(peerId, participant.name, stream);
         }
 
-        print('Remote stream received from $peerId');
+        print('✅ Remote stream from $peerId added to renderer');
         notifyListeners();
       }
     };
 
     pc.onConnectionState = (state) {
-      print('Connection state with $peerId: $state');
+      print('🔗 Peer connection state with $peerId: $state');
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        print('✅ Peer connection established with $peerId');
+      }
+    };
+
+    pc.onSignalingState = (state) {
+      print('📡 Signaling state with $peerId: $state');
     };
   }
 
   // Toggle subtitle functionality
   Future<void> toggleSubtitles() async {
-    _areSubtitlesEnabled = !_areSubtitlesEnabled;
+    _subtitlesEnabled = !_subtitlesEnabled;
 
-    if (_areSubtitlesEnabled) {
+    if (_subtitlesEnabled) {
       // Connect to Whisper service and start audio capture
       final connected = await _whisperService?.connect() ?? false;
       if (connected && _localStream != null && _userId != null) {
@@ -481,21 +625,27 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       await _whisperService?.disconnect();
     }
 
+    // Update in Firestore
+    if (_meetingId != null && _userId != null) {
+      await _firestore
+          .collection('meetings')
+          .doc(_meetingId)
+          .collection('participants')
+          .doc(_userId)
+          .update({'subtitlesEnabled': _subtitlesEnabled});
+    }
+
     notifyListeners();
   }
 
-  // Update language settings
-  Future<void> updateLanguageSettings({
-    required String nativeLanguage,
-    required String displayLanguage,
-  }) async {
-    _userNativeLanguage = nativeLanguage;
+  // Update language settings - NEW WORKFLOW
+  Future<void> updateDisplayLanguage(String displayLanguage) async {
     _userDisplayLanguage = displayLanguage;
 
-    // Update Whisper service
+    // Update Whisper service to translate everything to this language
     _whisperService?.setUserLanguages(
-      nativeLanguage: nativeLanguage,
-      displayLanguage: displayLanguage,
+      nativeLanguage: 'auto', // Auto-detect what each person speaks
+      displayLanguage: displayLanguage, // Always translate to user's preferred language
     );
 
     // Update in Firestore
@@ -506,20 +656,28 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
           .collection('participants')
           .doc(_userId)
           .update({
-        'nativeLanguage': nativeLanguage,
         'displayLanguage': displayLanguage,
       });
     }
 
+    print('🌍 Display language updated to: $displayLanguage');
     notifyListeners();
   }
 
-  // Toggle audio (updated to handle audio capture)
+  // FIXED: Toggle audio with better error handling
   Future<void> toggleAudio() async {
-    if (_localStream == null) return;
+    if (_localStream == null) {
+      print('⚠️ No local stream available for audio toggle');
+      return;
+    }
 
     try {
       final audioTracks = _localStream!.getAudioTracks();
+      if (audioTracks.isEmpty) {
+        print('⚠️ No audio tracks available');
+        return;
+      }
+
       for (var track in audioTracks) {
         track.enabled = !track.enabled;
       }
@@ -527,7 +685,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       _isAudioEnabled = audioTracks.first.enabled;
 
       // Update audio capture based on audio state
-      if (_areSubtitlesEnabled) {
+      if (_subtitlesEnabled) {
         if (_isAudioEnabled) {
           await _audioCaptureService?.startLocalCapture(
             _localStream!,
@@ -549,24 +707,34 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
             .update({'isAudioEnabled': _isAudioEnabled});
       }
 
+      print('🎙️ Audio ${_isAudioEnabled ? 'enabled' : 'disabled'}');
       notifyListeners();
     } catch (e) {
       print('Error toggling audio: $e');
     }
   }
 
-  // Toggle video
+  // FIXED: Toggle video with better error handling
   Future<void> toggleVideo() async {
-    if (_localStream == null) return;
+    if (_localStream == null) {
+      print('⚠️ No local stream available for video toggle');
+      return;
+    }
 
     try {
       final videoTracks = _localStream!.getVideoTracks();
+      if (videoTracks.isEmpty) {
+        print('⚠️ No video tracks available');
+        return;
+      }
+
       for (var track in videoTracks) {
         track.enabled = !track.enabled;
       }
 
       _isVideoEnabled = videoTracks.first.enabled;
 
+      // Update in Firestore
       if (_meetingId != null && _userId != null) {
         await _firestore
             .collection('meetings')
@@ -576,6 +744,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
             .update({'isVideoEnabled': _isVideoEnabled});
       }
 
+      print('📹 Video ${_isVideoEnabled ? 'enabled' : 'disabled'}');
       notifyListeners();
     } catch (e) {
       print('Error toggling video: $e');
@@ -590,7 +759,8 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     return _remoteRenderers[participantId];
   }
 
-  // Leave meeting (updated with cleanup)
+  // [Remaining methods continue with the same signaling logic...]
+  // Leave meeting with enhanced cleanup
   Future<void> leaveMeeting() async {
     if (_meetingId == null || _userId == null) return;
 
@@ -625,7 +795,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Remaining methods (signaling, connection handling, etc.) - keeping existing implementation
+  // [Include all remaining signaling methods from the original file...]
   void _listenForSignalingMessages() {
     if (_meetingId == null || _userId == null) return;
 
@@ -812,13 +982,16 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         _remoteRenderers.remove(peerId);
       }
 
+      // Remove from audio capture
+      _audioCaptureService?.removeRemoteStream(peerId);
+
       notifyListeners();
     } catch (e) {
       print('Error removing mesh connection: $e');
     }
   }
 
-  // Cleanup resources (updated with audio and whisper cleanup)
+  // Enhanced cleanup with better error handling
   Future<void> _cleanup() async {
     try {
       print('Cleaning up mesh resources...');
@@ -835,31 +1008,51 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       // Close peer connections
       for (var pc in _peerConnections.values) {
-        await pc.close();
+        try {
+          await pc.close();
+        } catch (e) {
+          print('Error closing peer connection: $e');
+        }
       }
       _peerConnections.clear();
 
       // Stop remote streams
       for (var stream in _remoteStreams.values) {
-        stream.getTracks().forEach((track) => track.stop());
+        try {
+          stream.getTracks().forEach((track) => track.stop());
+        } catch (e) {
+          print('Error stopping remote stream: $e');
+        }
       }
       _remoteStreams.clear();
 
       // Dispose renderers
       for (var renderer in _remoteRenderers.values) {
-        await renderer.dispose();
+        try {
+          await renderer.dispose();
+        } catch (e) {
+          print('Error disposing renderer: $e');
+        }
       }
       _remoteRenderers.clear();
 
       // Stop local stream
       if (_localStream != null) {
-        _localStream!.getTracks().forEach((track) => track.stop());
+        try {
+          _localStream!.getTracks().forEach((track) => track.stop());
+        } catch (e) {
+          print('Error stopping local stream: $e');
+        }
         _localStream = null;
       }
 
       // Dispose local renderer
       if (_localRenderer != null) {
-        await _localRenderer!.dispose();
+        try {
+          await _localRenderer!.dispose();
+        } catch (e) {
+          print('Error disposing local renderer: $e');
+        }
         _localRenderer = null;
       }
 
@@ -870,9 +1063,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       _participants.clear();
 
       notifyListeners();
-      print('Mesh resources cleaned up');
+      print('✅ Mesh resources cleaned up successfully');
     } catch (e) {
-      print('Error cleaning up: $e');
+      print('❌ Error during cleanup: $e');
     }
   }
 
@@ -884,7 +1077,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   }
 }
 
-// Updated Mesh Participant Model
+// Updated Mesh Participant Model with language support
 class MeshParticipant {
   final String id;
   final String name;
@@ -892,8 +1085,7 @@ class MeshParticipant {
   final bool isAudioEnabled;
   final bool isVideoEnabled;
   final bool isLocal;
-  final String nativeLanguage;
-  final String displayLanguage;
+  final String displayLanguage; // NEW: What language this user wants to see
 
   MeshParticipant({
     required this.id,
@@ -902,7 +1094,6 @@ class MeshParticipant {
     this.isAudioEnabled = true,
     this.isVideoEnabled = true,
     this.isLocal = false,
-    this.nativeLanguage = 'en',
     this.displayLanguage = 'en',
   });
 
@@ -913,7 +1104,6 @@ class MeshParticipant {
     bool? isAudioEnabled,
     bool? isVideoEnabled,
     bool? isLocal,
-    String? nativeLanguage,
     String? displayLanguage,
   }) {
     return MeshParticipant(
@@ -923,7 +1113,6 @@ class MeshParticipant {
       isAudioEnabled: isAudioEnabled ?? this.isAudioEnabled,
       isVideoEnabled: isVideoEnabled ?? this.isVideoEnabled,
       isLocal: isLocal ?? this.isLocal,
-      nativeLanguage: nativeLanguage ?? this.nativeLanguage,
       displayLanguage: displayLanguage ?? this.displayLanguage,
     );
   }
