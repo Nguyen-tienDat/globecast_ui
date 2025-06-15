@@ -1,0 +1,31 @@
+# GlobeCast Enhanced Whisper Server Requirements
+
+# Core Whisper dependencies
+faster-whisper==1.0.3
+torch==2.1.0
+torchaudio==2.1.0
+
+# Audio processing
+librosa==0.10.1
+soundfile==0.12.1
+numpy==1.24.3
+
+# WebSocket server
+websockets==12.0
+
+# HTTP requests for translation
+requests==2.31.0
+urllib3==2.0.7
+
+# Optional: GPU support (uncomment if you have CUDA)
+# torch==2.1.0+cu118 --index-url https://download.pytorch.org/whl/cu118
+# torchaudio==2.1.0+cu118 --index-url https://download.pytorch.org/whl/cu118
+
+# Development and debugging
+psutil==5.9.6
+
+# Optional: Better audio format support
+pydub==0.25.1
+
+# Optional: Performance monitoring
+memory-profiler==0.61.0
