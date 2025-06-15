@@ -1,4 +1,4 @@
-// lib/services/whisper_service.dart - IMPROVED FOR NEW WORKFLOW
+// lib/services/whisper_service.dart - FIXED VERSION
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -12,11 +12,21 @@ class WhisperService extends ChangeNotifier {
   StreamSubscription? _subscription;
   bool _isConnected = false;
   bool _isProcessing = false;
-  String _serverUrl = 'ws://127.0.0.1:8766';
 
-  // NEW WORKFLOW: Only user's display language matters
-  // We auto-detect what each person speaks and translate to user's preferred language
-  String _userDisplayLanguage = 'en'; // What user wants to see ALL subtitles in
+  // FIXED: Multiple server URLs to try
+  final List<String> _serverUrls = [
+    'ws://127.0.0.1:8766',  // Default port from server
+    'ws://localhost:8766',   // Alternative localhost
+    'ws://127.0.0.1:8080',  // Common alternative
+    'ws://127.0.0.1:8000',  // Another common port
+    'ws://127.0.0.1:3000',  // Development port
+  ];
+
+  int _currentServerIndex = 0;
+  String? _connectedUrl;
+
+  // User's display language (NEW WORKFLOW)
+  String _userDisplayLanguage = 'en';
 
   // Current subtitles for all participants
   final Map<String, SubtitleEntry> _currentSubtitles = {};
@@ -31,6 +41,10 @@ class WhisperService extends ChangeNotifier {
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 5;
+
+  // Connection timeout
+  Timer? _connectionTimeout;
+  static const Duration _connectionTimeoutDuration = Duration(seconds: 10);
 
   // Getters
   bool get isConnected => _isConnected;
@@ -62,63 +76,126 @@ class WhisperService extends ChangeNotifier {
     'fi': LanguageInfo(code: 'fi', name: 'Suomi', flag: '🇫🇮'),
   };
 
-  // Initialize connection to Whisper server with auto-retry
+  // FIXED: Improved connection with multiple URL attempts
   Future<bool> connect({String? serverUrl}) async {
     try {
       if (_isConnected) await disconnect();
 
-      final url = serverUrl ?? _serverUrl;
-      print('🌍 Connecting to Whisper server: $url');
+      print('🌍 Attempting to connect to Whisper server...');
 
+      // If specific URL provided, try it first
+      if (serverUrl != null) {
+        final success = await _tryConnectToUrl(serverUrl);
+        if (success) return true;
+      }
+
+      // Try all predefined URLs
+      for (int i = 0; i < _serverUrls.length; i++) {
+        _currentServerIndex = i;
+        final url = _serverUrls[i];
+
+        print('🔄 Trying server URL: $url');
+        final success = await _tryConnectToUrl(url);
+        if (success) {
+          _connectedUrl = url;
+          return true;
+        }
+
+        // Small delay between attempts
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      print('❌ All server URLs failed');
+      return false;
+
+    } catch (e) {
+      print('❌ Connection error: $e');
+      return false;
+    }
+  }
+
+  // FIXED: Better single URL connection attempt
+  Future<bool> _tryConnectToUrl(String url) async {
+    try {
+      final completer = Completer<bool>();
+      bool hasCompleted = false;
+
+      // Create WebSocket connection
       _channel = IOWebSocketChannel.connect(Uri.parse(url));
 
-      // Wait for connection or timeout
-      final completer = Completer<bool>();
-      Timer(const Duration(seconds: 10), () {
-        if (!completer.isCompleted) {
+      // Set connection timeout
+      _connectionTimeout = Timer(_connectionTimeoutDuration, () {
+        if (!hasCompleted) {
+          hasCompleted = true;
+          print('⏰ Connection timeout for $url');
+          _closeConnection();
           completer.complete(false);
         }
       });
 
+      // Setup stream listener
       _subscription = _channel!.stream.listen(
             (data) {
-          if (!completer.isCompleted) {
+          if (!hasCompleted) {
+            hasCompleted = true;
+            _connectionTimeout?.cancel();
+            _isConnected = true;
+            _reconnectAttempts = 0;
+            print('✅ Connected to Whisper server: $url');
+            _sendConnectionMessage();
+            onConnectionChanged?.call(true);
+            notifyListeners();
             completer.complete(true);
           }
           _handleMessage(data);
         },
         onError: (error) {
-          print('❌ WebSocket error: $error');
-          if (!completer.isCompleted) {
+          if (!hasCompleted) {
+            hasCompleted = true;
+            _connectionTimeout?.cancel();
+            print('❌ WebSocket error for $url: $error');
+            _closeConnection();
             completer.complete(false);
           }
-          _handleConnectionError(error);
         },
         onDone: () {
-          print('📴 WebSocket connection closed');
-          _handleConnectionClosed();
+          if (!hasCompleted) {
+            hasCompleted = true;
+            _connectionTimeout?.cancel();
+            print('📴 WebSocket closed for $url');
+            _closeConnection();
+            completer.complete(false);
+          } else {
+            // Connection was established but then closed
+            print('📴 WebSocket connection lost: $url');
+            _handleConnectionClosed();
+          }
         },
       );
 
-      final connected = await completer.future;
+      return await completer.future;
 
-      if (connected) {
-        _isConnected = true;
-        _reconnectAttempts = 0;
-        print('✅ Connected to Whisper server');
-        _sendConnectionMessage();
-        onConnectionChanged?.call(true);
-        notifyListeners();
-        return true;
-      } else {
-        await disconnect();
-        return false;
-      }
     } catch (e) {
-      print('❌ Failed to connect to Whisper server: $e');
-      await disconnect();
+      print('❌ Failed to connect to $url: $e');
+      _closeConnection();
       return false;
     }
+  }
+
+  // Close connection helper
+  void _closeConnection() {
+    try {
+      _connectionTimeout?.cancel();
+      _subscription?.cancel();
+      _channel?.sink.close();
+    } catch (e) {
+      print('⚠️ Error closing connection: $e');
+    }
+
+    _subscription = null;
+    _channel = null;
+    _isConnected = false;
+    _isProcessing = false;
   }
 
   // Disconnect from server
@@ -130,12 +207,7 @@ class WhisperService extends ChangeNotifier {
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
 
-      await _subscription?.cancel();
-      _subscription = null;
-
-      await _channel?.sink.close();
-      _channel = null;
-
+      _closeConnection();
       _currentSubtitles.clear();
 
       onConnectionChanged?.call(false);
@@ -153,10 +225,10 @@ class WhisperService extends ChangeNotifier {
     final message = {
       'type': 'connection_setup',
       'message': 'Flutter GlobeCast client connected',
-      'workflow': 'youtube_subtitles', // NEW: Indicate our workflow
+      'workflow': 'youtube_subtitles',
       'capabilities': {
         'user_display_language': _userDisplayLanguage,
-        'auto_detect_source': true, // We want to auto-detect what each person speaks
+        'auto_detect_source': true,
         'supported_languages': supportedLanguages.keys.toList(),
         'real_time_translation': true,
       },
@@ -166,14 +238,13 @@ class WhisperService extends ChangeNotifier {
     _sendMessage(message);
   }
 
-  // NEW WORKFLOW: Set user's preferred display language
+  // Set user's preferred display language
   void setUserDisplayLanguage(String displayLanguage) {
     _userDisplayLanguage = displayLanguage;
 
     print('🌐 User display language set to: $displayLanguage');
     print('🔄 All speech will now be translated to: ${supportedLanguages[displayLanguage]?.name}');
 
-    // Clear existing subtitles when language changes
     _currentSubtitles.clear();
     notifyListeners();
 
@@ -187,15 +258,15 @@ class WhisperService extends ChangeNotifier {
     }
   }
 
-  // Legacy method for compatibility - now just calls setUserDisplayLanguage
+  // Legacy method for compatibility
   void setUserLanguages({
-    required String nativeLanguage, // Ignored in new workflow
+    required String nativeLanguage,
     required String displayLanguage,
   }) {
     setUserDisplayLanguage(displayLanguage);
   }
 
-  // Send audio data for transcription with speaker info
+  // FIXED: Better audio data sending with retry
   Future<void> sendAudioData(Uint8List audioData, String speakerId, String speakerName) async {
     if (!_isConnected) {
       print('❌ Cannot send audio: not connected to Whisper server');
@@ -211,18 +282,28 @@ class WhisperService extends ChangeNotifier {
         'type': 'audio_metadata',
         'speaker_id': speakerId,
         'speaker_name': speakerName,
-        'target_language': _userDisplayLanguage, // NEW: Always translate to user's language
-        'auto_detect_source': true, // NEW: Auto-detect what the speaker is saying
+        'target_language': _userDisplayLanguage,
+        'auto_detect_source': true,
         'audio_size': audioData.length,
         'timestamp': DateTime.now().toIso8601String(),
       };
 
-      _sendMessage(metadata);
+      final success = _sendMessage(metadata);
+      if (!success) {
+        throw Exception('Failed to send metadata');
+      }
+
+      // Wait a bit for metadata to be processed
+      await Future.delayed(const Duration(milliseconds: 100));
 
       // Then send audio data as binary
-      _channel!.sink.add(audioData);
+      try {
+        _channel!.sink.add(audioData);
+        print('🎵 Sent audio data: ${audioData.length} bytes for $speakerName (→ $_userDisplayLanguage)');
+      } catch (e) {
+        throw Exception('Failed to send audio data: $e');
+      }
 
-      print('🎵 Sent audio data: ${audioData.length} bytes for $speakerName (→ $_userDisplayLanguage)');
     } catch (e) {
       print('❌ Error sending audio data: $e');
       onError?.call('Failed to send audio: $e');
@@ -231,7 +312,7 @@ class WhisperService extends ChangeNotifier {
     }
   }
 
-  // Handle incoming messages from server
+  // FIXED: Better message handling with error recovery
   void _handleMessage(dynamic data) {
     try {
       Map<String, dynamic> message;
@@ -248,12 +329,15 @@ class WhisperService extends ChangeNotifier {
 
       switch (type) {
         case 'connection_acknowledged':
+        case 'connection':
           _handleConnectionMessage(message);
           break;
         case 'transcription_result':
+        case 'transcription':
           _handleTranscriptionResult(message);
           break;
         case 'translation_complete':
+        case 'translation_result':
           _handleTranslationComplete(message);
           break;
         case 'processing_status':
@@ -262,18 +346,22 @@ class WhisperService extends ChangeNotifier {
         case 'error':
           _handleErrorMessage(message);
           break;
+        case 'test_response':
+          print('📨 Test successful: ${message['message']}');
+          break;
         default:
           print('❓ Unknown message type: $type');
       }
     } catch (e) {
       print('❌ Error handling message: $e');
+      // Don't crash on message errors
     }
   }
 
   // Handle connection acknowledgment
   void _handleConnectionMessage(Map<String, dynamic> message) {
     print('🤝 Connection acknowledged: ${message['message']}');
-    final capabilities = message['server_capabilities'];
+    final capabilities = message['server_capabilities'] ?? message['capabilities'];
     if (capabilities != null) {
       print('🎯 Server capabilities: $capabilities');
     }
@@ -283,7 +371,7 @@ class WhisperService extends ChangeNotifier {
   void _handleTranscriptionResult(Map<String, dynamic> message) {
     try {
       final String text = message['text'] ?? '';
-      final String detectedLanguage = message['detected_language'] ?? 'unknown';
+      final String detectedLanguage = message['language'] ?? message['detected_language'] ?? 'unknown';
       final double confidence = ((message['confidence'] ?? 0.0) as num).toDouble();
       final String speakerId = message['speaker_id'] ?? 'unknown';
       final String speakerName = message['speaker_name'] ?? 'Unknown Speaker';
@@ -291,7 +379,7 @@ class WhisperService extends ChangeNotifier {
 
       if (text.trim().isEmpty) return;
 
-      print('📝 Transcription (${detectedLanguage}): $text (confidence: ${(confidence * 100).toStringAsFixed(1)}%)');
+      print('📝 Transcription ($detectedLanguage): $text (confidence: ${(confidence * 100).toStringAsFixed(1)}%)');
 
       // Create subtitle entry
       final subtitle = SubtitleEntry(
@@ -306,16 +394,13 @@ class WhisperService extends ChangeNotifier {
         isFinal: isFinal,
       );
 
-      // NEW WORKFLOW: Check if translation is needed
+      // Check if translation is needed
       if (detectedLanguage != _userDisplayLanguage) {
-        // Different language detected - translation needed
         subtitle.translatedText = 'Translating...';
         subtitle.isTranslating = true;
-
         print('🌍 Requesting translation: $detectedLanguage → $_userDisplayLanguage');
         _requestTranslation(text, detectedLanguage, speakerId);
       } else {
-        // Same language - no translation needed
         subtitle.translatedText = text;
         subtitle.isTranslating = false;
         subtitle.translationConfidence = confidence;
@@ -435,7 +520,7 @@ class WhisperService extends ChangeNotifier {
     _attemptReconnect();
   }
 
-  // Auto-reconnect logic
+  // FIXED: Better auto-reconnect logic
   void _attemptReconnect() {
     if (_reconnectAttempts >= _maxReconnectAttempts) {
       print('❌ Max reconnection attempts reached');
@@ -449,6 +534,14 @@ class WhisperService extends ChangeNotifier {
 
     _reconnectTimer = Timer(delay, () async {
       print('🔄 Reconnecting to Whisper server...');
+
+      // Try to reconnect to the last successful URL first
+      if (_connectedUrl != null) {
+        final success = await _tryConnectToUrl(_connectedUrl!);
+        if (success) return;
+      }
+
+      // Otherwise try all URLs again
       final success = await connect();
       if (!success) {
         _attemptReconnect();
@@ -456,15 +549,20 @@ class WhisperService extends ChangeNotifier {
     });
   }
 
-  // Send message to server
-  void _sendMessage(Map<String, dynamic> message) {
-    if (!_isConnected || _channel == null) return;
+  // FIXED: Better message sending with error handling
+  bool _sendMessage(Map<String, dynamic> message) {
+    if (!_isConnected || _channel == null) {
+      print('❌ Cannot send message: not connected');
+      return false;
+    }
 
     try {
       final jsonMessage = jsonEncode(message);
       _channel!.sink.add(jsonMessage);
+      return true;
     } catch (e) {
       print('❌ Error sending message: $e');
+      return false;
     }
   }
 
@@ -499,13 +597,14 @@ class WhisperService extends ChangeNotifier {
   Map<String, dynamic> getConnectionInfo() {
     return {
       'isConnected': _isConnected,
+      'connectedUrl': _connectedUrl,
       'isProcessing': _isProcessing,
       'userDisplayLanguage': _userDisplayLanguage,
       'supportedLanguagesCount': supportedLanguages.length,
       'currentSubtitlesCount': _currentSubtitles.length,
       'historyCount': _subtitleHistory.length,
       'reconnectAttempts': _reconnectAttempts,
-      'serverUrl': _serverUrl,
+      'maxReconnectAttempts': _maxReconnectAttempts,
     };
   }
 
@@ -513,6 +612,7 @@ class WhisperService extends ChangeNotifier {
   void dispose() {
     print('🧹 Disposing WhisperService');
     _reconnectTimer?.cancel();
+    _connectionTimeout?.cancel();
     disconnect();
     super.dispose();
   }

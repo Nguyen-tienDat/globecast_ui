@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-GlobeCast Whisper Streaming Server - Improved Version
-Real-time Speech-to-Text + Translation with Enhanced Performance
+GlobeCast Whisper Streaming Server - MOBILE-FRIENDLY VERSION
+Real-time Speech-to-Text + Translation with Mobile Device Support
 """
 
 import asyncio
@@ -12,11 +12,13 @@ import tempfile
 import os
 import time
 import gc
+import socket
+import netifaces
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 
-# Core imports
+# Core imports with better error handling
 try:
     from faster_whisper import WhisperModel
     WHISPER_AVAILABLE = True
@@ -92,6 +94,33 @@ SUPPORTED_LANGUAGES = {
     "it": {"name": "Italiano", "flag": "🇮🇹"},
     "nl": {"name": "Nederlands", "flag": "🇳🇱"}
 }
+
+def get_network_interfaces():
+    """Get all available network interfaces and their IP addresses"""
+    interfaces = {}
+    try:
+        for interface in netifaces.interfaces():
+            addrs = netifaces.ifaddresses(interface)
+            if netifaces.AF_INET in addrs:
+                for addr in addrs[netifaces.AF_INET]:
+                    ip = addr['addr']
+                    if ip != '127.0.0.1':  # Skip localhost
+                        interfaces[interface] = ip
+        return interfaces
+    except Exception as e:
+        logger.warning(f"Could not enumerate network interfaces: {e}")
+        return {}
+
+def get_local_ip():
+    """Get the local IP address for mobile device connection"""
+    try:
+        # Connect to a remote address to determine local IP
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
 
 def initialize_whisper(model_name="base"):
     """Initialize Whisper model with better error handling"""
@@ -192,23 +221,29 @@ async def translate_text_enhanced(text, target_lang="en", source_lang="auto", ti
 
 async def handle_client(websocket, path):
     """Enhanced client handler with better connection management"""
-    client_id = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
-    logger.info(f"🔗 Client connected: {client_id}")
+    client_addr = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
+    client_id = f"client_{int(time.time())}_{len(clients)}"
+    logger.info(f"🔗 Client connected: {client_id} from {client_addr}")
 
     clients.add(websocket)
     server_stats.active_connections += 1
 
     try:
-        # Send enhanced welcome message
+        # Send enhanced welcome message with network info
+        local_ip = get_local_ip()
+        network_interfaces = get_network_interfaces()
+
         welcome_msg = {
-            "type": "connection",
+            "type": "connection_acknowledged",
             "status": "connected",
-            "message": "Connected to GlobeCast Whisper Server (Enhanced)",
+            "message": "Connected to GlobeCast Whisper Server (Mobile-Friendly)",
             "server_info": {
-                "version": "2.0",
+                "version": "2.1",
                 "whisper_available": whisper_model is not None,
                 "translation_available": REQUESTS_AVAILABLE,
-                "audio_processing": AUDIO_PROCESSING_AVAILABLE
+                "audio_processing": AUDIO_PROCESSING_AVAILABLE,
+                "local_ip": local_ip,
+                "network_interfaces": network_interfaces
             },
             "capabilities": {
                 "whisper": "loaded" if whisper_model else "unavailable",
@@ -216,6 +251,11 @@ async def handle_client(websocket, path):
                 "supported_languages": SUPPORTED_LANGUAGES,
                 "max_audio_size": "10MB",
                 "supported_formats": ["wav", "mp3", "webm", "ogg", "m4a"]
+            },
+            "connection_info": {
+                "client_id": client_id,
+                "client_address": client_addr,
+                "server_time": time.time()
             },
             "stats": asdict(server_stats),
             "timestamp": time.time()
@@ -275,7 +315,8 @@ async def handle_json_message(websocket, data, client_id):
     message_type = data.get("type", "unknown")
     logger.info(f"📨 {client_id} sent: {message_type}")
 
-    if message_type == "test":
+    if message_type in ["test", "test_connection"]:
+        local_ip = get_local_ip()
         response = {
             "type": "test_response",
             "message": "✅ GlobeCast server is running perfectly!",
@@ -285,7 +326,8 @@ async def handle_json_message(websocket, data, client_id):
                 "whisper": "ready" if whisper_model else "not_loaded",
                 "translation": "ready" if REQUESTS_AVAILABLE else "unavailable",
                 "uptime": time.time(),
-                "active_connections": server_stats.active_connections
+                "active_connections": server_stats.active_connections,
+                "local_ip": local_ip
             },
             "timestamp": time.time()
         }
@@ -295,7 +337,8 @@ async def handle_json_message(websocket, data, client_id):
         response = {
             "type": "pong",
             "timestamp": time.time(),
-            "server_stats": asdict(server_stats)
+            "server_stats": asdict(server_stats),
+            "server_time": time.time()
         }
         await websocket.send(json.dumps(response))
 
@@ -304,6 +347,49 @@ async def handle_json_message(websocket, data, client_id):
             "type": "server_stats",
             "stats": asdict(server_stats),
             "supported_languages": SUPPORTED_LANGUAGES,
+            "network_info": {
+                "local_ip": get_local_ip(),
+                "interfaces": get_network_interfaces()
+            },
+            "timestamp": time.time()
+        }
+        await websocket.send(json.dumps(response))
+
+    elif message_type == "connection_setup":
+        # Handle Flutter client setup
+        response = {
+            "type": "connection_acknowledged",
+            "message": "Connection setup acknowledged",
+            "capabilities": data.get("capabilities", {}),
+            "timestamp": time.time()
+        }
+        await websocket.send(json.dumps(response))
+
+    elif message_type == "language_preference_update":
+        # Handle language preference updates
+        user_lang = data.get("user_display_language", "en")
+        logger.info(f"🌍 {client_id} updated display language to: {user_lang}")
+
+        response = {
+            "type": "language_update_acknowledged",
+            "user_display_language": user_lang,
+            "timestamp": time.time()
+        }
+        await websocket.send(json.dumps(response))
+
+    elif message_type == "audio_metadata":
+        # Handle audio metadata (prepare for incoming audio)
+        speaker_id = data.get("speaker_id", "unknown")
+        speaker_name = data.get("speaker_name", "Unknown")
+        target_lang = data.get("target_language", "en")
+        audio_size = data.get("audio_size", 0)
+
+        logger.info(f"🎙️ {client_id} preparing audio: {speaker_name} → {target_lang} ({audio_size} bytes)")
+
+        response = {
+            "type": "audio_metadata_acknowledged",
+            "speaker_id": speaker_id,
+            "ready_for_audio": True,
             "timestamp": time.time()
         }
         await websocket.send(json.dumps(response))
@@ -377,7 +463,7 @@ async def handle_audio_data(websocket, audio_data, client_id):
 
             # Send result
             response = {
-                "type": "transcription",
+                "type": "transcription_result",
                 "text": str(result.text),
                 "language": str(result.language),
                 "confidence": float(result.confidence),
@@ -495,6 +581,10 @@ async def broadcast_stats():
                 stats_message = {
                     "type": "server_stats_broadcast",
                     "stats": asdict(server_stats),
+                    "network_info": {
+                        "local_ip": get_local_ip(),
+                        "interfaces": get_network_interfaces()
+                    },
                     "timestamp": time.time()
                 }
 
@@ -514,15 +604,53 @@ async def broadcast_stats():
         except Exception as e:
             logger.error(f"Error broadcasting stats: {e}")
 
-async def start_server(host="127.0.0.1", port=8766):
-    """Start the enhanced WebSocket server"""
-    logger.info(f"🚀 Starting GlobeCast Enhanced Whisper Server on {host}:{port}")
+def print_startup_info(host, port):
+    """Print comprehensive startup information"""
+    local_ip = get_local_ip()
+    network_interfaces = get_network_interfaces()
+
+    print("\n" + "="*60)
+    print("🌍 GlobeCast Enhanced Whisper Server - MOBILE READY")
+    print("="*60)
+    print(f"🚀 Server started on {host}:{port}")
+    print(f"📱 Local IP: {local_ip}")
+
+    if network_interfaces:
+        print("🌐 Available network interfaces:")
+        for interface, ip in network_interfaces.items():
+            print(f"   {interface}: {ip}")
+
+    print("\n📋 Connection URLs for mobile devices:")
+    print(f"   Local: ws://127.0.0.1:{port}")
+    print(f"   Network: ws://{local_ip}:{port}")
+
+    if network_interfaces:
+        for interface, ip in network_interfaces.items():
+            if ip != local_ip:
+                print(f"   {interface}: ws://{ip}:{port}")
+
+    print("\n🔧 For Android Emulator:")
+    print(f"   Use: ws://10.0.2.2:{port}")
+    print(f"   Or forward port: adb forward tcp:{port} tcp:{port}")
+
+    print("\n📊 Server capabilities:")
+    print(f"   - Whisper: {'✅ Ready' if whisper_model else '❌ Not available'}")
+    print(f"   - Translation: {'✅ Ready' if REQUESTS_AVAILABLE else '❌ Not available'}")
+    print(f"   - Audio Processing: {'✅ Ready' if AUDIO_PROCESSING_AVAILABLE else '❌ Limited'}")
+    print("="*60)
+    print("⏳ Waiting for connections...")
+    print("💡 Use the test client at: http://localhost:8080/test_client.html")
+    print()
+
+async def start_server(host="0.0.0.0", port=8766):
+    """Start the enhanced WebSocket server with mobile support"""
+    logger.info(f"🚀 Starting GlobeCast Enhanced Whisper Server")
 
     try:
         # Start stats broadcaster
         asyncio.create_task(broadcast_stats())
 
-        # Start WebSocket server with enhanced configuration
+        # Start WebSocket server with enhanced configuration for mobile
         server = await websockets.serve(
             handle_client,
             host,
@@ -533,14 +661,7 @@ async def start_server(host="127.0.0.1", port=8766):
             compression='deflate'
         )
 
-        logger.info("✅ Enhanced server started successfully!")
-        logger.info(f"📊 Server capabilities:")
-        logger.info(f"   - Whisper: {'✅ Ready' if whisper_model else '❌ Not available'}")
-        logger.info(f"   - Translation: {'✅ Ready' if REQUESTS_AVAILABLE else '❌ Not available'}")
-        logger.info(f"   - Audio Processing: {'✅ Ready' if AUDIO_PROCESSING_AVAILABLE else '❌ Limited'}")
-        logger.info(f"   - Max connections: Unlimited")
-        logger.info(f"   - Thread pool: 4 workers")
-        logger.info("⏳ Waiting for connections...")
+        print_startup_info(host, port)
 
         # Keep server running
         await server.wait_closed()
@@ -550,7 +671,7 @@ async def start_server(host="127.0.0.1", port=8766):
         raise
 
 def main():
-    """Enhanced main function with better configuration"""
+    """Enhanced main function with mobile-friendly configuration"""
     # Setup enhanced logging
     logging.basicConfig(
         level=logging.INFO,
@@ -567,23 +688,39 @@ def main():
     whisper_ready = initialize_whisper("base")
 
     if not whisper_ready:
-        logger.error("❌ Failed to initialize Whisper model - server cannot start")
+        logger.error("❌ Failed to initialize Whisper model")
+        print("\n❌ Server cannot start without Whisper model")
+        print("💡 Make sure to install: pip install faster-whisper")
         return
 
     if not REQUESTS_AVAILABLE:
         logger.warning("⚠️ Translation not available - install requests: pip install requests")
-        logger.warning("⚠️ Continuing with transcription only")
+        print("⚠️ Continuing with transcription only")
     else:
         logger.info("✅ Translation ready using enhanced requests implementation")
 
     if not AUDIO_PROCESSING_AVAILABLE:
         logger.warning("⚠️ Limited audio processing - install soundfile and numpy for better support")
 
+    # Parse command line arguments for host and port
+    import sys
+    host = "0.0.0.0"  # Listen on all interfaces for mobile connectivity
+    port = 8766
+
+    if len(sys.argv) > 1:
+        try:
+            port = int(sys.argv[1])
+        except ValueError:
+            print(f"Invalid port: {sys.argv[1]}, using default {port}")
+
+    if len(sys.argv) > 2:
+        host = sys.argv[2]
+
     # Start server
     try:
-        asyncio.run(start_server())
+        asyncio.run(start_server(host, port))
     except KeyboardInterrupt:
-        logger.info("\n👋 Shutting down server gracefully...")
+        print("\n👋 Shutting down server gracefully...")
         # Cleanup
         thread_pool.shutdown(wait=True)
         logger.info("🧹 Cleanup completed")
