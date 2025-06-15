@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Web Audio Helper</title>
+</head>
+<body>
+<script>
+    /**
+     * Web Audio Helper for Flutter WebRTC Audio Capture
+     * Provides real audio capture from MediaStream using Web Audio API
+     */
+
+    class WebRTCAudioCapture {
+        constructor() {
+            this.audioContext = null;
+            this.processors = new Map(); // Map of streamId -> processor info
+            this.isInitialized = false;
+            this.sampleRate = 16000; // Target sample rate for Whisper
+        }
+
+        /**
+         * Initialize Web Audio API context
+         */
+        async initialize() {
+            try {
+                // Create AudioContext with target sample rate
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 44100, // Browser default, we'll resample
+                });
+
+                // Resume context if suspended
+                if (this.audioContext.state === 'suspended') {
+                    await this.audioContext.resume();
+                }
+
+                this.isInitialized = true;
+                console.log('✅ Web Audio API initialized');
+                console.log(`   Context sample rate: ${this.audioContext.sampleRate} Hz`);
+
+                return true;
+            } catch (error) {
+                console.error('❌ Failed to initialize Web Audio API:', error);
+                return false;
+            }
+        }
+
+        /**
+         * Start capturing audio from MediaStream
+         */
+        async startCapture(mediaStream, streamId, speakerName, onAudioData) {
+            if (!this.isInitialized) {
+                throw new Error('Web Audio API not initialized');
+            }
+
+            try {
+                console.log(`🎙️ Starting audio capture for: ${speakerName}`);
+
+                // Get audio track
+                const audioTracks = mediaStream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    throw new Error('No audio tracks found in stream');
+                }
+
+                // Create MediaStreamAudioSourceNode
+                const source = this.audioContext.createMediaStreamSource(mediaStream);
+
+                // Create ScriptProcessorNode (legacy but works everywhere)
+                // Note: AudioWorklet is preferred but requires more setup
+                const bufferSize = 4096; // Process in 4096 sample chunks
+                const processor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+                // Audio processing variables
+                let audioBuffer = [];
+                const targetChunkSize = this.sampleRate * 1.0; // 1 second chunks
+                let lastProcessTime = Date.now();
+
+                processor.onaudioprocess = (event) => {
+                    const inputBuffer = event.inputBuffer;
+                    const inputData = inputBuffer.getChannelData(0); // Mono
+
+                    // Convert Float32Array to regular Array and resample
+                    const resampledData = this.resampleAudio(
+                        Array.from(inputData),
+                        this.audioContext.sampleRate,
+                        this.sampleRate
+                    );
+
+                    // Add to buffer
+                    audioBuffer.push(...resampledData);
+
+                    // Process when we have enough data
+                    if (audioBuffer.length >= targetChunkSize) {
+                        const chunk = audioBuffer.splice(0, targetChunkSize);
+
+                        // Convert to PCM16 bytes
+                        const pcmData = this.convertToPCM16(chunk);
+
+                        // Check if not silent
+                        if (!this.isSilent(chunk)) {
+                            // Send to Flutter via callback
+                            onAudioData(streamId, speakerName, Array.from(pcmData));
+                        }
+
+                        lastProcessTime = Date.now();
+                    }
+
+                    // Prevent buffer overflow
+                    if (audioBuffer.length > targetChunkSize * 10) {
+                        audioBuffer = audioBuffer.slice(-targetChunkSize * 5);
+                        console.warn('⚠️ Audio buffer overflow, truncating');
+                    }
+                };
+
+                // Connect the audio graph
+                source.connect(processor);
+                processor.connect(this.audioContext.destination);
+
+                // Store processor info
+                this.processors.set(streamId, {
+                    source,
+                    processor,
+                    mediaStream,
+                    speakerName,
+                    startTime: Date.now(),
+                });
+
+                console.log(`✅ Audio capture started for: ${speakerName}`);
+                return true;
+
+            } catch (error) {
+                console.error(`❌ Failed to start audio capture for ${speakerName}:`, error);
+                throw error;
+            }
+        }
+
+        /**
+         * Stop capturing audio from a stream
+         */
+        stopCapture(streamId) {
+            const processorInfo = this.processors.get(streamId);
+            if (!processorInfo) {
+                console.warn(`⚠️ No processor found for stream: ${streamId}`);
+                return;
+            }
+
+            try {
+                // Disconnect audio nodes
+                processorInfo.source.disconnect();
+                processorInfo.processor.disconnect();
+
+                // Remove from map
+                this.processors.delete(streamId);
+
+                console.log(`✅ Audio capture stopped for: ${processorInfo.speakerName}`);
+            } catch (error) {
+                console.error(`❌ Error stopping audio capture for ${streamId}:`, error);
+            }
+        }
+
+        /**
+         * Stop all audio capture
+         */
+        stopAllCapture() {
+            console.log('🛑 Stopping all audio capture...');
+
+            for (const [streamId, processorInfo] of this.processors) {
+                try {
+                    processorInfo.source.disconnect();
+                    processorInfo.processor.disconnect();
+                } catch (error) {
+                    console.error(`Error stopping capture for ${streamId}:`, error);
+                }
+            }
+
+            this.processors.clear();
+            console.log('✅ All audio capture stopped');
+        }
+
+        /**
+         * Resample audio from source sample rate to target sample rate
+         */
+        resampleAudio(inputSamples, sourceSampleRate, targetSampleRate) {
+            if (sourceSampleRate === targetSampleRate) {
+                return inputSamples;
+            }
+
+            const ratio = sourceSampleRate / targetSampleRate;
+            const outputLength = Math.round(inputSamples.length / ratio);
+            const output = new Array(outputLength);
+
+            for (let i = 0; i < outputLength; i++) {
+                const sourceIndex = i * ratio;
+                const index = Math.floor(sourceIndex);
+                const fraction = sourceIndex - index;
+
+                if (index + 1 < inputSamples.length) {
+                    // Linear interpolation
+                    output[i] = inputSamples[index] * (1 - fraction) +
+                               inputSamples[index + 1] * fraction;
+                } else {
+                    output[i] = inputSamples[index] || 0;
+                }
+            }
+
+            return output;
+        }
+
+        /**
+         * Convert float samples to PCM16 bytes
+         */
+        convertToPCM16(samples) {
+            const pcmData = new Uint8Array(samples.length * 2);
+            const view = new DataView(pcmData.buffer);
+
+            for (let i = 0; i < samples.length; i++) {
+                // Clamp to [-1, 1] and convert to 16-bit signed integer
+                const clampedSample = Math.max(-1, Math.min(1, samples[i]));
+                const intSample = Math.round(clampedSample * 32767);
+                view.setInt16(i * 2, intSample, true); // little endian
+            }
+
+            return pcmData;
+        }
+
+        /**
+         * Check if audio chunk is silent
+         */
+        isSilent(samples, threshold = 0.01) {
+            // Calculate RMS
+            let sum = 0;
+            for (const sample of samples) {
+                sum += sample * sample;
+            }
+            const rms = Math.sqrt(sum / samples.length);
+            return rms < threshold;
+        }
+
+        /**
+         * Calculate audio level for visualization
+         */
+        calculateAudioLevel(samples) {
+            let sum = 0;
+            for (const sample of samples) {
+                sum += sample * sample;
+            }
+            return Math.sqrt(sum / samples.length);
+        }
+
+        /**
+         * Get capture statistics
+         */
+        getStats() {
+            const stats = {
+                isInitialized: this.isInitialized,
+                contextState: this.audioContext?.state,
+                contextSampleRate: this.audioContext?.sampleRate,
+                targetSampleRate: this.sampleRate,
+                activeCaptures: this.processors.size,
+                processors: [],
+            };
+
+            for (const [streamId, info] of this.processors) {
+                stats.processors.push({
+                    streamId,
+                    speakerName: info.speakerName,
+                    startTime: info.startTime,
+                    duration: Date.now() - info.startTime,
+                });
+            }
+
+            return stats;
+        }
+
+        /**
+         * Cleanup resources
+         */
+        dispose() {
+            console.log('🗑️ Disposing WebRTC Audio Capture...');
+
+            this.stopAllCapture();
+
+            if (this.audioContext) {
+                this.audioContext.close();
+                this.audioContext = null;
+            }
+
+            this.isInitialized = false;
+        }
+    }
+
+    // Create global instance
+    window.webRTCAudioCapture = new WebRTCAudioCapture();
+
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', async () => {
+        try {
+            await window.webRTCAudioCapture.initialize();
+            console.log('🌐 Web Audio Helper ready');
+        } catch (error) {
+            console.error('❌ Web Audio Helper initialization failed:', error);
+        }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        if (window.webRTCAudioCapture) {
+            window.webRTCAudioCapture.dispose();
+        }
+    });
+
+    /**
+     * Flutter integration methods
+     * These methods will be called from Flutter via js interop
+     */
+
+    // Start audio capture for a MediaStream
+    window.startWebRTCAudioCapture = async function(mediaStream, streamId, speakerName) {
+        try {
+            const onAudioData = (streamId, speakerName, pcmData) => {
+                // Convert PCM data to base64 for Flutter
+                const base64Data = btoa(String.fromCharCode.apply(null, pcmData));
+
+                // Send to Flutter via postMessage or callback
+                if (window.flutterAudioCallback) {
+                    window.flutterAudioCallback(streamId, speakerName, base64Data);
+                }
+            };
+
+            return await window.webRTCAudioCapture.startCapture(
+                mediaStream, streamId, speakerName, onAudioData
+            );
+        } catch (error) {
+            console.error('Start capture error:', error);
+            return false;
+        }
+    };
+
+    // Stop audio capture for a stream
+    window.stopWebRTCAudioCapture = function(streamId) {
+        try {
+            window.webRTCAudioCapture.stopCapture(streamId);
+            return true;
+        } catch (error) {
+            console.error('Stop capture error:', error);
+            return false;
+        }
+    };
+
+    // Get audio capture statistics
+    window.getWebRTCAudioStats = function() {
+        try {
+            return window.webRTCAudioCapture.getStats();
+        } catch (error) {
+            console.error('Get stats error:', error);
+            return null;
+        }
+    };
+
+    // Set Flutter callback for audio data
+    window.setFlutterAudioCallback = function(callback) {
+        window.flutterAudioCallback = callback;
+    };
+
+    console.log('🌐 Web Audio Helper script loaded');
+
+</script>
+</body>
+</html>

@@ -78,10 +78,9 @@ dependencies:
   translator: ^1.0.3+1
 
   speech_to_text: ^7.0.0
-  highlight_text: ^1.8.0
-  avatar_glow: ^3.0.1
   connectivity_plus: ^6.1.4
   uuid: ^4.5.1
+  intl: ^0.20.2
 
 
 

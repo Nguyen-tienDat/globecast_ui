@@ -32,6 +32,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   // Stream subscriptions for cleanup
   final List<StreamSubscription> _subscriptions = [];
 
+  // FIXED: Track pending connections to prevent duplicates
+  final Set<String> _pendingConnections = {};
+
   // Getters
   String? get meetingId => _meetingId;
   String? get userId => _userId;
@@ -42,7 +45,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   List<MeshParticipant> get participants => List.unmodifiable(_participants);
   RTCVideoRenderer? get localRenderer => _localRenderer;
 
-  // ICE Servers configuration
+  // ICE Servers configuration - KEEP ORIGINAL
   final Map<String, dynamic> _iceServers = {
     'iceServers': [
       {
@@ -174,7 +177,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Setup local media stream
+  // FIXED: Enhanced local media stream setup
   Future<void> _setupLocalStream() async {
     try {
       print('Setting up local stream...');
@@ -185,15 +188,34 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         await _localRenderer!.initialize();
       }
 
-      // Get user media
+      // FIXED: Get user media with better constraints
       _localStream = await navigator.mediaDevices.getUserMedia({
-        'audio': _isAudioEnabled,
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
         'video': {
           'facingMode': 'user',
           'width': {'ideal': 640},
           'height': {'ideal': 480},
+          'frameRate': {'ideal': 30},
         },
       });
+
+      // FIXED: Verify stream has tracks
+      final audioTracks = _localStream!.getAudioTracks();
+      final videoTracks = _localStream!.getVideoTracks();
+
+      print('Local stream setup - Audio tracks: ${audioTracks.length}, Video tracks: ${videoTracks.length}');
+
+      // Set track states
+      for (var track in audioTracks) {
+        track.enabled = _isAudioEnabled;
+      }
+      for (var track in videoTracks) {
+        track.enabled = _isVideoEnabled;
+      }
 
       _localRenderer!.srcObject = _localStream;
       print('Local stream setup complete');
@@ -261,10 +283,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       print('Added self as participant');
     } catch (e) {
       print('Error adding self as participant: $e');
-      // For debugging - print the exact error
-      if (e.toString().contains('document path')) {
-        print('Document path error - userId: $_userId, meetingId: $_meetingId');
-      }
       rethrow;
     }
   }
@@ -303,8 +321,10 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
         newParticipants.add(participant);
 
-        // Create peer connection for remote participants
-        if (participantId != _userId && !_peerConnections.containsKey(participantId)) {
+        // FIXED: Create peer connection for remote participants with duplicate check
+        if (participantId != _userId &&
+            !_peerConnections.containsKey(participantId) &&
+            !_pendingConnections.contains(participantId)) {
           await _createMeshConnection(participantId);
         }
       }
@@ -327,8 +347,15 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     _subscriptions.add(subscription);
   }
 
-  // Create mesh connection with a peer
+  // FIXED: Create mesh connection with better logic
   Future<void> _createMeshConnection(String peerId) async {
+    if (_pendingConnections.contains(peerId)) {
+      print('Connection to $peerId already pending, skipping');
+      return;
+    }
+
+    _pendingConnections.add(peerId);
+
     try {
       print("Creating mesh connection with peer: $peerId");
 
@@ -341,25 +368,32 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       await renderer.initialize();
       _remoteRenderers[peerId] = renderer;
 
-      // Add local stream to peer connection
+      // FIXED: Add local stream tracks properly
       if (_localStream != null) {
-        _localStream!.getTracks().forEach((track) {
-          pc.addTrack(track, _localStream!);
-        });
+        // Add each track individually
+        final tracks = _localStream!.getTracks();
+        for (var track in tracks) {
+          await pc.addTrack(track, _localStream!);
+          print('Added ${track.kind} track to peer connection with $peerId');
+        }
       }
 
       // Setup event handlers
       _setupPeerConnectionEventHandlers(pc, peerId);
 
-      // Create and send offer
-      await _createAndSendOffer(pc, peerId);
+      // FIXED: Only create offer if we have lower ID (deterministic initiator)
+      if (_userId!.compareTo(peerId) < 0) {
+        await _createAndSendOffer(pc, peerId);
+      }
 
     } catch (e) {
       print('Error creating mesh connection with $peerId: $e');
+    } finally {
+      _pendingConnections.remove(peerId);
     }
   }
 
-  // Setup peer connection event handlers
+  // FIXED: Setup peer connection event handlers
   void _setupPeerConnectionEventHandlers(RTCPeerConnection pc, String peerId) {
     pc.onIceConnectionState = (state) {
       print('ICE connection state with $peerId: $state');
@@ -371,16 +405,26 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     };
 
     pc.onIceCandidate = (candidate) async {
-      await _sendIceCandidate(peerId, candidate);
+      if (candidate.candidate != null) {
+        await _sendIceCandidate(peerId, candidate);
+      }
     };
 
+    // FIXED: Enhanced onTrack handler
     pc.onTrack = (event) {
+      print('Received ${event.track.kind} track from $peerId');
+
       if (event.streams.isNotEmpty) {
         final stream = event.streams[0];
         _remoteStreams[peerId] = stream;
-        _remoteRenderers[peerId]?.srcObject = stream;
-        print('Remote stream received from $peerId');
-        notifyListeners();
+
+        // Set the stream to renderer
+        final renderer = _remoteRenderers[peerId];
+        if (renderer != null) {
+          renderer.srcObject = stream;
+          print('Remote stream assigned to renderer for $peerId');
+          notifyListeners();
+        }
       }
     };
 
@@ -414,7 +458,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
     print('Listening for signaling messages...');
 
-    // Use existing 'calls' collection for signaling or create new 'signaling' subcollection
     final subscription = _firestore
         .collection('meetings')
         .doc(_meetingId)
@@ -464,7 +507,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Handle offer
+  // FIXED: Handle offer properly
   Future<void> _handleOffer(String fromId, Map<String, dynamic> message) async {
     try {
       // Create peer connection if doesn't exist
@@ -574,6 +617,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     try {
       print('Removing mesh connection with $peerId');
 
+      // Remove from pending
+      _pendingConnections.remove(peerId);
+
       // Close peer connection
       final pc = _peerConnections[peerId];
       if (pc != null) {
@@ -665,6 +711,24 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     return _remoteRenderers[participantId];
   }
 
+  /// Update display language preference
+  Future<void> updateDisplayLanguage(String languageCode) async {
+    try {
+      if (_meetingId != null && _userId != null) {
+        await _firestore
+            .collection('meetings')
+            .doc(_meetingId)
+            .collection('participants')
+            .doc(_userId)
+            .update({'displayLanguage': languageCode});
+
+        print('Display language updated to: $languageCode');
+      }
+    } catch (e) {
+      print('Error updating display language: $e');
+    }
+  }
+
   // Leave meeting using existing structure
   Future<void> leaveMeeting() async {
     if (_meetingId == null || _userId == null) return;
@@ -743,6 +807,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         await _localRenderer!.dispose();
         _localRenderer = null;
       }
+
+      // Clear pending connections
+      _pendingConnections.clear();
 
       // Reset state
       _meetingId = null;
