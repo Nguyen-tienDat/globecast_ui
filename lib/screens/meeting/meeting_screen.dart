@@ -1,18 +1,19 @@
-// lib/screens/meeting/meeting_screen.dart - Enhanced với Whisper test
+// lib/screens/meeting/meeting_screen.dart - Updated with User-Specific Workflow
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
-import 'package:globecast_ui/services/audio_capture_service.dart';
 import 'package:provider/provider.dart';
-import 'package:globecast_ui/screens/meeting/controller.dart';
-import 'package:globecast_ui/screens/meeting/widgets/chat_panel.dart';
-import 'package:globecast_ui/screens/meeting/widgets/participants_panel.dart';
-import 'package:globecast_ui/screens/meeting/widgets/language_selection_panel.dart';
-import 'package:globecast_ui/widgets/subtitle_widget.dart';
-import 'package:globecast_ui/theme/app_theme.dart';
+import '../../services/webrtc_mesh_meeting_service.dart';
+import '../../services/whisper_service.dart';
+import '../../services/user_specific_transcript_service.dart';
+import '../../services/audio_capture_service.dart';
+import '../../widgets/enahanced_subtitle_widget.dart';
+import '../../theme/app_theme.dart';
 import '../../router/app_router.dart';
-import '../../services/webrtc_media_helper.dart';
+import 'controller.dart';
+import 'language_selection_screen.dart';
+import 'widgets/chat_panel.dart';
+import 'widgets/participants_panel.dart';
 
 class MeetingScreen extends StatefulWidget {
   final String code;
@@ -27,95 +28,71 @@ class MeetingScreen extends StatefulWidget {
 }
 
 class _MeetingScreenState extends State<MeetingScreen> with WidgetsBindingObserver {
+
   // Services
   late WebRTCMeshMeetingService _webrtcService;
   late WhisperService _whisperService;
+  late UserSpecificTranscriptService _transcriptService;
   late EnhancedAudioCaptureService _audioCaptureService;
-
-  bool _isTranscriptVisible = false;
-  int _transcriptCount = 0;
 
   // Meeting state
   bool _isJoining = true;
   String? _errorMessage;
-  bool _isInitializingAI = false;
+  String _userDisplayLanguage = 'en';
+  String _userName = 'User';
 
-  // AI Features state
-  bool _subtitlesVisible = true;
-  bool _whisperConnected = false;
-  bool _audioCapturing = false;
-  String _currentDisplayLanguage = 'en';
-  String _currentNativeLanguage = 'auto';
+  // UI state
+  bool _isChatVisible = false;
+  bool _isParticipantsVisible = false;
+  bool _areSubtitlesVisible = true;
+  bool _showLanguageSelection = false;
 
-  // TEST: Latest transcription for debugging
-  String _latestTranscription = '';
-  int _transcriptionCount = 0;
-
-  // Subtitle configuration
-  SubtitleConfig _subtitleConfig = const SubtitleConfig(
-    showSpeakerName: true,
-    showOriginalText: false,
-    enableAnimations: true,
-    maxLines: 3,
-    displayDuration: Duration(seconds: 10),
-  );
-
-  // Connection statistics
-  final Map<String, dynamic> _connectionStats = {
-    'webrtc': {'status': 'disconnected', 'participants': 0},
-    'whisper': {'status': 'disconnected', 'transcriptions': 0},
-    'audio': {'status': 'stopped', 'streams': 0},
-  };
+  // Initialization flags
+  bool _servicesInitialized = false;
+  bool _meetingJoined = false;
+  bool _transcriptServiceReady = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _extractArgumentsAndInitialize();
+  }
 
-    // Initialize services
-    _webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
-    _whisperService = Provider.of<WhisperService>(context, listen: false);
-    _audioCaptureService = Provider.of<EnhancedAudioCaptureService>(context, listen: false);
+  void _extractArgumentsAndInitialize() {
+    // Extract arguments from route
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
-    _setupServiceCallbacks();
-    _joinMeeting();
-    _initializeWhisperService();
+      if (args != null) {
+        _userDisplayLanguage = args['displayLanguage'] ?? 'en';
+        _userName = args['userName'] ?? 'User';
+      }
+
+      print('🎯 Meeting Screen initialized');
+      print('   Meeting Code: ${widget.code}');
+      print('   User: $_userName');
+      print('   Display Language: $_userDisplayLanguage');
+
+      _initializeServices();
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _cleanupServices();
     super.dispose();
-  }
-
-  void _initializeWhisperService() async {
-    _whisperService = WhisperService();
-
-    // Listen to transcription count
-    _whisperService.transcriptionStream.listen((result) {
-      setState(() {
-        _transcriptCount++;
-      });
-    });
-
-    // Connect to Whisper server
-    await _whisperService.connect(
-      userId: 'user_${DateTime.now().millisecondsSinceEpoch}',
-      displayName: 'User ${DateTime.now().millisecondsSinceEpoch % 1000}',
-      nativeLanguage: 'auto',
-      displayLanguage: 'en',
-    );
-
-    print('🌍 Whisper service initialized');
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.paused:
+        _pauseServices();
         break;
       case AppLifecycleState.resumed:
-        _checkAndReconnectServices();
+        _resumeServices();
         break;
       case AppLifecycleState.detached:
         _cleanupServices();
@@ -125,382 +102,189 @@ class _MeetingScreenState extends State<MeetingScreen> with WidgetsBindingObserv
     }
   }
 
-  /// Setup service callbacks
-  void _setupServiceCallbacks() {
-    // Whisper service callbacks
-    _whisperService.onTranscriptionReceived = (result) {
-      if (mounted) {
-        setState(() {
-          _latestTranscription = '${result.speakerName}: "${result.translatedText}"';
-          _transcriptionCount++;
-        });
-
-        print('📝 [TEST] Transcription #$_transcriptionCount: ${result.speakerName}: "${result.translatedText}"');
-        print('📝 [TEST] Original: "${result.originalText}" (${result.originalLanguage})');
-        print('📝 [TEST] Confidence: ${result.transcriptionConfidence.toStringAsFixed(2)}');
-
-        _updateConnectionStats();
-
-        // Show snackbar for testing
-        _showSnackBar('🎤 ${result.speakerName}: ${result.translatedText}');
-      }
-    };
-
-    _whisperService.onError = (error) {
-      if (mounted) {
-        print('❌ [TEST] Whisper error: $error');
-        _showSnackBar('Whisper error: $error', isError: true);
-      }
-    };
-
-    _whisperService.onConnectionChanged = (state) {
-      if (mounted) {
-        setState(() {
-          _whisperConnected = state == WhisperConnectionState.connected;
-        });
-
-        print('🔄 [TEST] Whisper connection state: $state');
-
-        switch (state) {
-          case WhisperConnectionState.connected:
-            _showSnackBar('🤖 Whisper AI connected - Ready for speech!');
-            break;
-          case WhisperConnectionState.disconnected:
-            _showSnackBar('Whisper disconnected', isError: true);
-            break;
-          case WhisperConnectionState.reconnecting:
-            _showSnackBar('Reconnecting to Whisper...');
-            break;
-          case WhisperConnectionState.error:
-            _showSnackBar('Whisper connection error', isError: true);
-            break;
-          default:
-            break;
-        }
-        _updateConnectionStats();
-      }
-    };
-
-    // Audio capture service callbacks
-    _audioCaptureService.onAudioCaptured = (audioData, speakerId, speakerName) {
-      print('🎤 [TEST] Audio captured from $speakerName: ${audioData.length} bytes');
-
-      // Forward audio to Whisper service
-      if (_whisperService.isConnected) {
-        _whisperService.sendAudioData(audioData, speakerId, speakerName);
-        print('📤 [TEST] Audio forwarded to Whisper service');
-      } else {
-        print('⚠️ [TEST] Whisper not connected, audio not sent');
-      }
-    };
-
-    _audioCaptureService.onError = (error) {
-      if (mounted) {
-        print('❌ [TEST] Audio capture error: $error');
-        _showSnackBar('Audio capture error: $error', isError: true);
-      }
-    };
-
-    _audioCaptureService.onSpeakerActivityChanged = (speakerId, speakerName, isActive) {
-      print('🎤 [TEST] $speakerName is ${isActive ? "speaking" : "silent"}');
-      if (mounted) {
-        _updateConnectionStats();
-      }
-    };
-  }
-
-  /// Join meeting with AI features
-  Future<void> _joinMeeting() async {
+  /// Initialize all services in proper order
+  Future<void> _initializeServices() async {
     try {
       setState(() {
         _isJoining = true;
         _errorMessage = null;
       });
 
-      // Step 1: Join WebRTC meeting
-      print('🔗 [TEST] Joining WebRTC meeting...');
+      // Get service instances
+      _webrtcService = Provider.of<WebRTCMeshMeetingService>(context, listen: false);
+      _whisperService = Provider.of<WhisperService>(context, listen: false);
+      _transcriptService = Provider.of<UserSpecificTranscriptService>(context, listen: false);
+      _audioCaptureService = Provider.of<EnhancedAudioCaptureService>(context, listen: false);
+
+      print('🔄 Step 1: Initializing core services...');
+
+      // Step 1: Initialize audio capture service
+      final audioCaptureInitialized = await _audioCaptureService.initialize();
+      if (!audioCaptureInitialized) {
+        throw Exception('Audio capture initialization failed');
+      }
+
+      // Step 2: Join WebRTC meeting
+      print('🔄 Step 2: Joining WebRTC meeting...');
       await _joinWebRTCMeeting();
 
-      // Step 2: Initialize AI features
-      print('🤖 [TEST] Initializing AI features...');
-      await _initializeAIFeatures();
+      // Step 3: Initialize transcript service for this user
+      print('🔄 Step 3: Setting up user-specific transcript service...');
+      final transcriptInitialized = await _transcriptService.initializeForUser(
+        userId: _webrtcService.userId ?? 'unknown',
+        meetingId: widget.code,
+        displayLanguage: _userDisplayLanguage,
+      );
+
+      if (!transcriptInitialized) {
+        print('⚠️ Transcript service initialization failed, continuing without AI features');
+      }
+
+      // Step 4: Connect to Whisper service
+      print('🔄 Step 4: Connecting to Whisper AI...');
+      await _connectWhisperService();
+
+      // Step 5: Start audio capture
+      print('🔄 Step 5: Starting audio capture...');
+      await _startAudioCapture();
 
       setState(() {
         _isJoining = false;
+        _servicesInitialized = true;
+        _meetingJoined = true;
+        _transcriptServiceReady = transcriptInitialized;
       });
 
-      print('✅ [TEST] Meeting joined successfully with AI features');
-      _showSnackBar('🎉 Meeting joined! Try speaking to test STT...');
+      print('✅ Meeting joined successfully with AI translation!');
+      _showSuccessMessage();
 
     } catch (e) {
+      print('❌ Meeting initialization failed: $e');
       setState(() {
         _isJoining = false;
         _errorMessage = e.toString();
       });
-      print('❌ [TEST] Failed to join meeting: $e');
     }
   }
 
   /// Join WebRTC meeting
   Future<void> _joinWebRTCMeeting() async {
-    final displayName = 'User ${DateTime.now().millisecondsSinceEpoch % 1000}';
     _webrtcService.setUserDetails(
-      displayName: displayName,
+      displayName: _userName,
       userId: _webrtcService.userId,
     );
 
     await _webrtcService.joinMeeting(meetingId: widget.code);
-    _updateConnectionStats();
-  }
-
-  /// Initialize AI features (Whisper + Audio Capture)
-  Future<void> _initializeAIFeatures() async {
-    setState(() {
-      _isInitializingAI = true;
-    });
-
-    try {
-      print('🤖 [TEST] Initializing AI features...');
-
-      // Step 1: Initialize audio capture service
-      print('🎙️ [TEST] Initializing audio capture...');
-      final audioCaptureInitialized = await _audioCaptureService.initialize();
-      if (!audioCaptureInitialized) {
-        throw Exception('Audio capture initialization failed');
-      }
-      print('✅ [TEST] Audio capture initialized');
-
-      // Step 2: Connect to Whisper service
-      if (_subtitlesVisible) {
-        print('🌍 [TEST] Connecting to Whisper service...');
-        await _connectWhisperService();
-      }
-
-      // Step 3: Start audio capture from WebRTC streams
-      print('🎵 [TEST] Starting audio capture...');
-      await _startAudioCapture();
-
-      print('✅ [TEST] AI features initialized successfully');
-
-    } catch (e) {
-      print('⚠️ [TEST] AI features initialization failed: $e');
-      setState(() {
-        _subtitlesVisible = false;
-      });
-      _showSnackBar('AI features unavailable: $e', isError: true);
-    } finally {
-      setState(() {
-        _isInitializingAI = false;
-      });
-    }
+    print('✅ WebRTC meeting joined successfully');
   }
 
   /// Connect to Whisper service
   Future<void> _connectWhisperService() async {
-    try {
-      print('🌍 [TEST] Connecting to Whisper service...');
-      print('🌍 [TEST] User: ${_getDisplayName()}, ID: ${_webrtcService.userId}');
-      print('🌍 [TEST] Languages: $_currentNativeLanguage → $_currentDisplayLanguage');
+    final connected = await _whisperService.connect(
+      userId: _webrtcService.userId ?? 'unknown',
+      displayName: _userName,
+      nativeLanguage: 'auto', // Auto-detect speech language
+      displayLanguage: _userDisplayLanguage,
+    );
 
-      final connected = await _whisperService.connect(
-        userId: _webrtcService.userId ?? 'unknown',
-        displayName: _getDisplayName(),
-        nativeLanguage: _currentNativeLanguage,
-        displayLanguage: _currentDisplayLanguage,
-      );
-
-      if (connected) {
-        setState(() {
-          _whisperConnected = true;
-        });
-        print('✅ [TEST] Whisper service connected successfully');
-        _showSnackBar('🤖 Whisper connected! Start speaking to test...');
-      } else {
-        throw Exception('Failed to connect to Whisper service');
-      }
-    } catch (e) {
-      print('❌ [TEST] Whisper connection failed: $e');
-      setState(() {
-        _whisperConnected = false;
-        _subtitlesVisible = false;
-      });
-      _showSnackBar('AI Translation service unavailable', isError: true);
+    if (!connected) {
+      throw Exception('Failed to connect to Whisper AI service');
     }
+
+    print('✅ Whisper AI connected successfully');
   }
 
   /// Start audio capture from WebRTC streams
   Future<void> _startAudioCapture() async {
-    try {
-      // Start local audio capture
-      if (_webrtcService.localRenderer?.srcObject != null) {
-        await _audioCaptureService.startLocalCapture(
-          _webrtcService.localRenderer!.srcObject!,
-          _webrtcService.userId ?? 'unknown',
-          _getDisplayName(),
-        );
+    // Start local audio capture
+    if (_webrtcService.localRenderer?.srcObject != null) {
+      await _audioCaptureService.startLocalCapture(
+        _webrtcService.localRenderer!.srcObject!,
+        _webrtcService.userId ?? 'unknown',
+        _userName,
+      );
+      print('🎙️ Local audio capture started');
+    }
 
-        setState(() {
-          _audioCapturing = true;
-        });
-
-        print('🎙️ [TEST] Local audio capture started');
-      } else {
-        print('⚠️ [TEST] No local stream available for audio capture');
-      }
-
-      // Add existing remote streams
-      for (final participant in _webrtcService.participants) {
-        if (!participant.isLocal) {
-          final renderer = _webrtcService.getRendererForParticipant(participant.id);
-          if (renderer?.srcObject != null) {
-            await _audioCaptureService.addRemoteStream(
-              participant.id,
-              participant.name,
-              renderer!.srcObject!,
-            );
-            print('🎙️ [TEST] Added remote stream for ${participant.name}');
-          }
+    // Add existing remote streams
+    for (final participant in _webrtcService.participants) {
+      if (!participant.isLocal) {
+        final renderer = _webrtcService.getRendererForParticipant(participant.id);
+        if (renderer?.srcObject != null) {
+          await _audioCaptureService.addRemoteStream(
+            participant.id,
+            participant.name,
+            renderer!.srcObject!,
+          );
+          print('🎙️ Added remote stream for ${participant.name}');
         }
       }
-
-    } catch (e) {
-      print('❌ [TEST] Audio capture start failed: $e');
-      _showSnackBar('Audio capture failed: $e', isError: true);
     }
+
+    print('✅ Audio capture fully operational');
   }
 
-  /// Get display name for current user
-  String _getDisplayName() {
-    final participants = _webrtcService.participants;
-    final currentUser = participants.firstWhere(
-          (p) => p.id == _webrtcService.userId,
-      orElse: () => MeshParticipant(id: '', name: 'User'),
+  void _showSuccessMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Meeting Joined Successfully!',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    'AI translation to ${_getLanguageName(_userDisplayLanguage)} is active',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
-    return currentUser.name;
   }
 
-  /// Check and reconnect services
-  Future<void> _checkAndReconnectServices() async {
-    print('🔄 [TEST] Checking service connections...');
+  void _pauseServices() {
+    print('⏸️ Pausing services due to app state change');
+    // Implement pause logic if needed
+  }
 
-    if (_subtitlesVisible && !_whisperService.isConnected) {
-      await _connectWhisperService();
+  void _resumeServices() {
+    print('▶️ Resuming services due to app state change');
+    // Implement resume logic if needed
+  }
+
+  Future<void> _cleanupServices() async {
+    print('🧹 Cleaning up all services...');
+
+    try {
+      await _audioCaptureService.stopCapture();
+      await _whisperService.disconnect();
+      await _webrtcService.leaveMeeting();
+      await _transcriptService.dispose();
+    } catch (e) {
+      print('⚠️ Error during cleanup: $e');
     }
   }
 
-  /// Cleanup services
-  Future<void> _cleanupServices() async {
-    print('🧹 [TEST] Cleaning up AI services...');
-
-    await _audioCaptureService.stopCapture();
-    await _whisperService.disconnect();
-  }
-
-  /// Navigate to home
   void _navigateToHome() {
     if (mounted) {
       Navigator.pushNamedAndRemoveUntil(
         context,
         Routes.home,
             (route) => false,
-      );
-    }
-  }
-
-  /// Toggle subtitles on/off
-  Future<void> _toggleSubtitles() async {
-    setState(() {
-      _subtitlesVisible = !_subtitlesVisible;
-    });
-
-    if (_subtitlesVisible) {
-      await _connectWhisperService();
-    } else {
-      await _whisperService.disconnect();
-      setState(() {
-        _whisperConnected = false;
-      });
-    }
-
-    HapticFeedback.lightImpact();
-  }
-
-  /// TEST: Manual test button for Whisper
-  void _testWhisperConnection() async {
-    _showSnackBar('🧪 Testing Whisper connection...');
-
-    final health = _whisperService.getConnectionHealth();
-    print('🧪 [TEST] Whisper health: $health');
-
-    if (_whisperService.isConnected) {
-      _showSnackBar('✅ Whisper is connected and ready!');
-    } else {
-      _showSnackBar('❌ Whisper not connected. Attempting reconnection...', isError: true);
-      await _connectWhisperService();
-    }
-  }
-
-  /// Update language preferences
-  Future<void> _updateLanguages({
-    String? nativeLanguage,
-    String? displayLanguage,
-  }) async {
-    if (nativeLanguage != null) {
-      _currentNativeLanguage = nativeLanguage;
-    }
-    if (displayLanguage != null) {
-      _currentDisplayLanguage = displayLanguage;
-    }
-
-    // Update WebRTC service
-    if (displayLanguage != null) {
-      await _webrtcService.updateDisplayLanguage(displayLanguage);
-    }
-
-    // Update Whisper service
-    if (_whisperService.isConnected) {
-      await _whisperService.setUserLanguages(
-        nativeLanguage: _currentNativeLanguage,
-        displayLanguage: _currentDisplayLanguage,
-      );
-    }
-
-    _showSnackBar('Languages updated: $_currentNativeLanguage → $_currentDisplayLanguage');
-  }
-
-  /// Update connection statistics
-  void _updateConnectionStats() {
-    setState(() {
-      _connectionStats['webrtc'] = {
-        'status': _webrtcService.isMeetingActive ? 'connected' : 'disconnected',
-        'participants': _webrtcService.participants.length,
-      };
-      _connectionStats['whisper'] = {
-        'status': _whisperConnected ? 'connected' : 'disconnected',
-        'transcriptions': _transcriptionCount,
-      };
-      _connectionStats['audio'] = {
-        'status': _audioCapturing ? 'capturing' : 'stopped',
-        'streams': _audioCaptureService.activeStreamsCount,
-      };
-    });
-  }
-
-  /// Show snackbar message
-  void _showSnackBar(String message, {bool isError = false}) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: isError ? Colors.red : Colors.green,
-          duration: Duration(seconds: isError ? 4 : 3),
-          behavior: SnackBarBehavior.floating,
-          margin: EdgeInsets.only(
-            bottom: MediaQuery.of(context).size.height * 0.15,
-            left: 16,
-            right: 16,
-          ),
-        ),
       );
     }
   }
@@ -521,29 +305,10 @@ class _MeetingScreenState extends State<MeetingScreen> with WidgetsBindingObserv
         controller.setOnMeetingEndedCallback(_navigateToHome);
         return controller;
       },
-      child: _MeetingContent(
-        meetingCode: widget.code,
-        subtitlesVisible: _subtitlesVisible,
-        subtitleConfig: _subtitleConfig,
-        whisperConnected: _whisperConnected,
-        audioCapturing: _audioCapturing,
-        currentLanguage: _currentDisplayLanguage,
-        latestTranscription: _latestTranscription,
-        transcriptionCount: _transcriptionCount,
-        connectionStats: _connectionStats,
-        onToggleSubtitles: _toggleSubtitles,
-        onTestWhisper: _testWhisperConnection,
-        onUpdateLanguages: _updateLanguages,
-        onUpdateSubtitleConfig: (config) {
-          setState(() {
-            _subtitleConfig = config;
-          });
-        },
-      ),
+      child: _buildMeetingContent(),
     );
   }
 
-  /// Build loading screen
   Widget _buildLoadingScreen() {
     return Scaffold(
       backgroundColor: Colors.black,
@@ -551,66 +316,120 @@ class _MeetingScreenState extends State<MeetingScreen> with WidgetsBindingObserv
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const CircularProgressIndicator(color: GcbAppTheme.primary),
-            const SizedBox(height: 24),
+            // Loading indicator
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: GcbAppTheme.primary.withOpacity(0.3),
+                  width: 2,
+                ),
+              ),
+              child: const CircularProgressIndicator(
+                color: GcbAppTheme.primary,
+                strokeWidth: 3,
+              ),
+            ),
+
+            const SizedBox(height: 32),
+
+            // Main status
             Text(
               'Joining Meeting...',
               style: TextStyle(
                 color: Colors.grey[300],
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
               ),
             ),
+
             const SizedBox(height: 12),
-            Text(
-              _isInitializingAI
-                  ? 'Setting up AI translation...'
-                  : 'Connecting to mesh network...',
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 14,
+
+            // Language info
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: GcbAppTheme.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: GcbAppTheme.primary.withOpacity(0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _getLanguageFlag(_userDisplayLanguage),
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Subtitles: ${_getLanguageName(_userDisplayLanguage)}',
+                    style: const TextStyle(
+                      color: GcbAppTheme.primary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (_isInitializingAI) ...[
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: GcbAppTheme.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: GcbAppTheme.primary.withOpacity(0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: GcbAppTheme.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Connecting to Whisper AI...',
-                      style: TextStyle(
-                        color: GcbAppTheme.primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+
+            const SizedBox(height: 24),
+
+            // Steps
+            Container(
+              padding: const EdgeInsets.all(20),
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              decoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(16),
               ),
-            ],
+              child: Column(
+                children: [
+                  _buildLoadingStep('Connecting to meeting...', true),
+                  _buildLoadingStep('Setting up real-time translation...', _meetingJoined),
+                  _buildLoadingStep('Initializing AI transcription...', _transcriptServiceReady),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  /// Build error screen
+  Widget _buildLoadingStep(String text, bool isCompleted) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 16,
+            height: 16,
+            decoration: BoxDecoration(
+              color: isCompleted ? Colors.green : Colors.grey[700],
+              shape: BoxShape.circle,
+            ),
+            child: isCompleted
+                ? const Icon(Icons.check, color: Colors.white, size: 12)
+                : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: isCompleted ? Colors.white : Colors.grey[500],
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildErrorScreen() {
     return Scaffold(
       backgroundColor: Colors.black,
@@ -623,34 +442,40 @@ class _MeetingScreenState extends State<MeetingScreen> with WidgetsBindingObserv
               const Icon(
                 Icons.error_outline,
                 color: Colors.red,
-                size: 64,
+                size: 80,
               ),
               const SizedBox(height: 24),
               const Text(
                 'Failed to Join Meeting',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 22,
+                  fontSize: 24,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                _errorMessage!,
-                style: TextStyle(color: Colors.grey[300], fontSize: 16),
-                textAlign: TextAlign.center,
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+                ),
+                child: Text(
+                  _errorMessage!,
+                  style: TextStyle(
+                    color: Colors.red[300],
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
               ),
               const SizedBox(height: 32),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _errorMessage = null;
-                      });
-                      _joinMeeting();
-                    },
+                    onPressed: _initializeServices,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: GcbAppTheme.primary,
                       padding: const EdgeInsets.symmetric(
@@ -687,99 +512,89 @@ class _MeetingScreenState extends State<MeetingScreen> with WidgetsBindingObserv
       ),
     );
   }
-}
 
-/// Meeting content with enhanced Whisper testing
-class _MeetingContent extends StatelessWidget {
-  final String meetingCode;
-  final bool subtitlesVisible;
-  final SubtitleConfig subtitleConfig;
-  final bool whisperConnected;
-  final bool audioCapturing;
-  final String currentLanguage;
-  final String latestTranscription;
-  final int transcriptionCount;
-  final Map<String, dynamic> connectionStats;
-  final VoidCallback onToggleSubtitles;
-  final VoidCallback onTestWhisper;
-  final Function({String? nativeLanguage, String? displayLanguage}) onUpdateLanguages;
-  final Function(SubtitleConfig) onUpdateSubtitleConfig;
-
-  const _MeetingContent({
-    required this.meetingCode,
-    required this.subtitlesVisible,
-    required this.subtitleConfig,
-    required this.whisperConnected,
-    required this.audioCapturing,
-    required this.currentLanguage,
-    required this.latestTranscription,
-    required this.transcriptionCount,
-    required this.connectionStats,
-    required this.onToggleSubtitles,
-    required this.onTestWhisper,
-    required this.onUpdateLanguages,
-    required this.onUpdateSubtitleConfig,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<WebRTCMeshMeetingService>(
-      builder: (context, webrtcService, child) {
-        final controller = context.watch<MeetingController>();
-
+  Widget _buildMeetingContent() {
+    return Consumer<MeetingController>(
+      builder: (context, controller, child) {
         return Scaffold(
           backgroundColor: Colors.black,
           body: WillPopScope(
             onWillPop: () async {
-              _showEndCallDialog(context, controller);
+              _showEndCallDialog(controller);
               return false;
             },
             child: SafeArea(
               child: Stack(
                 children: [
-                  // Main content
+                  // Main meeting layout
                   Column(
                     children: [
-                      // Enhanced info bar with AI status
-                      _buildEnhancedInfoBar(context, controller),
+                      // Meeting header
+                      _buildMeetingHeader(controller),
 
                       // Video area
                       Expanded(
-                        child: _buildVideoAreaWithTranscription(context, controller, webrtcService),
+                        child: _buildVideoArea(controller),
                       ),
 
-                      // Enhanced control panel
-                      _buildEnhancedControlBar(context, controller),
+                      // Enhanced subtitle widget
+                      if (_areSubtitlesVisible && _transcriptServiceReady)
+                        EnhancedSubtitleWidget(
+                          isVisible: _areSubtitlesVisible,
+                          userDisplayLanguage: _userDisplayLanguage,
+                          onToggleVisibility: () {
+                            setState(() {
+                              _areSubtitlesVisible = !_areSubtitlesVisible;
+                            });
+                          },
+                          onLanguagePressed: () {
+                            setState(() {
+                              _showLanguageSelection = true;
+                            });
+                          },
+                          showControls: true,
+                          isCompactMode: false,
+                        ),
+
+                      // Control bar
+                      _buildControlBar(controller),
                     ],
                   ),
 
                   // Side panels
-                  if (controller.isChatVisible)
+                  if (_isChatVisible)
                     Positioned(
-                      top: 56,
+                      top: 60,
                       right: 0,
-                      bottom: 80,
-                      width: MediaQuery.of(context).size.width * 0.3,
+                      bottom: _areSubtitlesVisible ? 280 : 100,
+                      width: MediaQuery.of(context).size.width * 0.35,
                       child: const ChatPanel(),
                     ),
 
-                  if (controller.isParticipantsListVisible)
+                  if (_isParticipantsVisible)
                     Positioned(
-                      top: 56,
+                      top: 60,
                       right: 0,
-                      bottom: 80,
-                      width: MediaQuery.of(context).size.width * 0.3,
+                      bottom: _areSubtitlesVisible ? 280 : 100,
+                      width: MediaQuery.of(context).size.width * 0.35,
                       child: const ParticipantsPanel(),
                     ),
 
-                  if (controller.isLanguageMenuVisible)
-                    Positioned(
-                      top: 56,
-                      right: 0,
-                      bottom: 80,
-                      width: MediaQuery.of(context).size.width * 0.3,
-                      child: LanguageSelectionPanel(),
+                  // Floating language indicator
+                  if (!_areSubtitlesVisible)
+                    FloatingLanguageIndicator(
+                      currentLanguage: _userDisplayLanguage,
+                      onTap: () {
+                        setState(() {
+                          _showLanguageSelection = true;
+                        });
+                      },
+                      isActive: _transcriptServiceReady,
                     ),
+
+                  // Language selection overlay
+                  if (_showLanguageSelection)
+                    _buildLanguageSelectionOverlay(),
                 ],
               ),
             ),
@@ -789,12 +604,11 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  /// Build enhanced info bar with Whisper testing info
-  Widget _buildEnhancedInfoBar(BuildContext context, MeetingController controller) {
+  Widget _buildMeetingHeader(MeetingController controller) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.black,
+        color: Colors.black.withOpacity(0.8),
         border: Border(
           bottom: BorderSide(
             color: Colors.white.withOpacity(0.1),
@@ -812,28 +626,40 @@ class _MeetingContent extends StatelessWidget {
                 Row(
                   children: [
                     Icon(
-                      connectionStats['webrtc']['status'] == 'connected'
-                          ? Icons.meeting_room
-                          : Icons.meeting_room_outlined,
-                      color: connectionStats['webrtc']['status'] == 'connected'
-                          ? Colors.green
-                          : Colors.red,
+                      Icons.meeting_room,
+                      color: Colors.green,
                       size: 16,
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      meetingCode,
+                      widget.code,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    const SizedBox(width: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _getLanguageColor(_userDisplayLanguage).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _getLanguageName(_userDisplayLanguage),
+                        style: TextStyle(
+                          color: _getLanguageColor(_userDisplayLanguage),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${connectionStats['webrtc']['participants']} participants • ${connectionStats['whisper']['transcriptions']} transcriptions',
+                  '${controller.participantCount} participants • AI Translation Active',
                   style: TextStyle(
                     color: Colors.grey[400],
                     fontSize: 11,
@@ -843,48 +669,20 @@ class _MeetingContent extends StatelessWidget {
             ),
           ),
 
-          // AI Features status with test button
+          // Connection status
           Row(
             children: [
-              // Audio capture status
               _buildStatusIndicator(
-                icon: audioCapturing ? Icons.graphic_eq : Icons.mic_off,
-                label: 'AUDIO',
-                isActive: audioCapturing,
-                color: audioCapturing ? Colors.green : Colors.grey,
+                'AI',
+                _transcriptServiceReady,
+                _transcriptServiceReady ? Colors.green : Colors.orange,
               ),
               const SizedBox(width: 8),
-
-              // AI status with test button
-              GestureDetector(
-                onTap: onTestWhisper,
-                child: _buildStatusIndicator(
-                  icon: whisperConnected ? Icons.psychology : Icons.psychology_outlined,
-                  label: 'AI',
-                  isActive: whisperConnected,
-                  color: whisperConnected ? GcbAppTheme.primary : Colors.grey,
-                ),
+              _buildStatusIndicator(
+                'AUDIO',
+                controller.isMicOn,
+                controller.isMicOn ? Colors.green : Colors.grey,
               ),
-              const SizedBox(width: 8),
-
-              // Language indicator
-              if (whisperConnected)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: GcbAppTheme.primary.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: GcbAppTheme.primary, width: 1),
-                  ),
-                  child: Text(
-                    currentLanguage.toUpperCase(),
-                    style: const TextStyle(
-                      color: GcbAppTheme.primary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
             ],
           ),
         ],
@@ -892,105 +690,62 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  /// Build status indicator
-  Widget _buildStatusIndicator({
-    required IconData icon,
-    required String label,
-    required bool isActive,
-    required Color color,
-  }) {
+  Widget _buildStatusIndicator(String label, bool isActive, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
-        color: isActive ? color.withOpacity(0.15) : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isActive ? color : Colors.grey,
-          width: 1,
-        ),
+        color: isActive ? color.withOpacity(0.2) : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color, width: 1),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-        ],
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 8,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
       ),
     );
   }
 
-  /// Build video area with transcription display
-  Widget _buildVideoAreaWithTranscription(BuildContext context, MeetingController controller, WebRTCMeshMeetingService webrtcService) {
-    return Stack(
-      children: [
-        // Main video area (same as before)
-        _buildMainVideoView(context, controller, webrtcService),
-
-        // Whisper test panel overlay (top-left)
-        if (whisperConnected || transcriptionCount > 0)
-          Positioned(
-            top: 16,
-            left: 16,
-            child: _buildWhisperTestPanel(),
-          ),
-
-        // Latest transcription overlay (bottom)
-        if (latestTranscription.isNotEmpty)
-          Positioned(
-            bottom: 100,
-            left: 16,
-            right: 16,
-            child: _buildTranscriptionDisplay(),
-          ),
-
-        // Participant thumbnails
-        Positioned(
-          bottom: 8,
-          left: 8,
-          right: 8,
-          child: _buildParticipantThumbnails(context, controller),
-        ),
-      ],
-    );
-  }
-
-  /// Build main video view (simplified version)
-  Widget _buildMainVideoView(BuildContext context, MeetingController controller, WebRTCMeshMeetingService webrtcService) {
+  Widget _buildVideoArea(MeetingController controller) {
     final participants = controller.participants;
     final remoteParticipants = participants.where((p) => !p.isLocal).toList();
-    final localRenderer = webrtcService.localRenderer;
+    final localRenderer = _webrtcService.localRenderer;
 
     return Container(
       color: Colors.black,
       child: Stack(
         children: [
-          // Main content area
+          // Main video content
           if (remoteParticipants.isNotEmpty)
-            _buildRemoteVideoView(controller, remoteParticipants.first)
+            _buildMainVideoView(controller, remoteParticipants.first)
           else
             _buildWaitingView(),
 
-          // Local video pip (top-right)
+          // Local video PiP
           if (localRenderer != null)
             Positioned(
               top: 16,
               right: 16,
-              child: _buildLocalVideoPip(localRenderer, webrtcService),
+              child: _buildLocalVideoPip(localRenderer),
+            ),
+
+          // Participant thumbnails
+          if (remoteParticipants.length > 1)
+            Positioned(
+              bottom: 16,
+              left: 16,
+              right: 16,
+              child: _buildParticipantThumbnails(controller, remoteParticipants),
             ),
         ],
       ),
     );
   }
 
-  Widget _buildRemoteVideoView(MeetingController controller, MeshParticipant participant) {
+  Widget _buildMainVideoView(MeetingController controller, MeshParticipant participant) {
     final renderer = controller.getRendererForParticipant(participant.id);
 
     return Stack(
@@ -1011,31 +766,32 @@ class _MeetingContent extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   CircleAvatar(
-                    radius: 32,
-                    backgroundColor: GcbAppTheme.primary,
+                    radius: 40,
+                    backgroundColor: _getLanguageColor(_userDisplayLanguage),
                     child: Text(
                       participant.name.isNotEmpty ? participant.name[0].toUpperCase() : '?',
-                      style: const TextStyle(fontSize: 24, color: Colors.white),
+                      style: const TextStyle(fontSize: 28, color: Colors.white),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   Text(
                     participant.name,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    style: const TextStyle(color: Colors.white, fontSize: 18),
                   ),
                 ],
               ),
             ),
           ),
-        // Name overlay
+
+        // Speaker name overlay
         Positioned(
-          bottom: 16,
-          left: 16,
+          bottom: 20,
+          left: 20,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(16),
+              color: Colors.black.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1045,7 +801,7 @@ class _MeetingContent extends StatelessWidget {
                   color: participant.isAudioEnabled ? Colors.white : Colors.red,
                   size: 16,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 Text(
                   participant.name,
                   style: const TextStyle(color: Colors.white, fontSize: 14),
@@ -1060,49 +816,61 @@ class _MeetingContent extends StatelessWidget {
 
   Widget _buildWaitingView() {
     return Center(
-      child: Container(
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: Colors.grey[900],
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.people_outline, size: 64, color: Colors.grey[600]),
-            const SizedBox(height: 16),
-            Text(
-              'Waiting for participants...',
-              style: TextStyle(color: Colors.grey[400], fontSize: 18),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              color: _getLanguageColor(_userDisplayLanguage).withOpacity(0.1),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: _getLanguageColor(_userDisplayLanguage),
+                width: 2,
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Try speaking to test Whisper STT',
-              style: TextStyle(color: Colors.grey[500], fontSize: 14),
+            child: Icon(
+              Icons.people_outline,
+              size: 60,
+              color: _getLanguageColor(_userDisplayLanguage),
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Waiting for participants...',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'AI translation to ${_getLanguageName(_userDisplayLanguage)} is ready',
+            style: TextStyle(
+              color: Colors.grey[400],
+              fontSize: 14,
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildLocalVideoPip(RTCVideoRenderer renderer, WebRTCMeshMeetingService webrtcService) {
+  Widget _buildLocalVideoPip(RTCVideoRenderer renderer) {
     return Container(
       width: 120,
       height: 160,
       decoration: BoxDecoration(
-        color: Colors.grey[900],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: webrtcService.isVideoEnabled ? GcbAppTheme.primary : Colors.grey,
-          width: 2,
-        ),
+        border: Border.all(color: _getLanguageColor(_userDisplayLanguage), width: 2),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(
           children: [
-            if (webrtcService.isVideoEnabled)
+            if (_webrtcService.isVideoEnabled)
               Positioned.fill(
                 child: RTCVideoView(
                   renderer,
@@ -1117,13 +885,14 @@ class _MeetingContent extends StatelessWidget {
                   child: Icon(Icons.videocam_off, color: Colors.white, size: 32),
                 ),
               ),
-            // "You" label
+
+            // User label
             Positioned(
               bottom: 4,
               left: 4,
               right: 4,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.8),
                   borderRadius: BorderRadius.circular(8),
@@ -1131,8 +900,8 @@ class _MeetingContent extends StatelessWidget {
                 child: Row(
                   children: [
                     Icon(
-                      webrtcService.isAudioEnabled ? Icons.mic : Icons.mic_off,
-                      color: webrtcService.isAudioEnabled ? Colors.white : Colors.red,
+                      _webrtcService.isAudioEnabled ? Icons.mic : Icons.mic_off,
+                      color: _webrtcService.isAudioEnabled ? Colors.white : Colors.red,
                       size: 12,
                     ),
                     const SizedBox(width: 4),
@@ -1153,204 +922,38 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  /// Build Whisper test panel
-  Widget _buildWhisperTestPanel() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.8),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: whisperConnected ? GcbAppTheme.primary : Colors.red,
-          width: 2,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Icon(
-                whisperConnected ? Icons.psychology : Icons.psychology_outlined,
-                color: whisperConnected ? GcbAppTheme.primary : Colors.red,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Whisper AI',
-                style: TextStyle(
-                  color: whisperConnected ? GcbAppTheme.primary : Colors.red,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            whisperConnected ? 'Connected & Listening' : 'Disconnected',
-            style: TextStyle(
-              color: Colors.grey[300],
-              fontSize: 12,
-            ),
-          ),
-          if (transcriptionCount > 0) ...[
-            const SizedBox(height: 4),
-            Text(
-              'Transcriptions: $transcriptionCount',
-              style: TextStyle(
-                color: Colors.grey[400],
-                fontSize: 11,
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Text(
-            'Tap AI status to test connection',
-            style: TextStyle(
-              color: Colors.grey[500],
-              fontSize: 10,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Build transcription display
-  Widget _buildTranscriptionDisplay() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: GcbAppTheme.primary, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.transcribe,
-                color: GcbAppTheme.primary,
-                size: 16,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Latest Transcription (#$transcriptionCount)',
-                style: TextStyle(
-                  color: GcbAppTheme.primary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            latestTranscription,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Build participant thumbnails
-  Widget _buildParticipantThumbnails(BuildContext context, MeetingController controller) {
-    final participants = controller.participants;
-    final remoteParticipants = participants.where((p) => !p.isLocal).toList();
-
-    if (remoteParticipants.length <= 1) {
-      return const SizedBox.shrink();
-    }
-
+  Widget _buildParticipantThumbnails(MeetingController controller, List<MeshParticipant> participants) {
     return SizedBox(
-      height: 90,
+      height: 80,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        itemCount: remoteParticipants.length,
+        itemCount: participants.length,
         itemBuilder: (context, index) {
-          final participant = remoteParticipants[index];
+          final participant = participants[index];
           final renderer = controller.getRendererForParticipant(participant.id);
 
           return Container(
-            width: 120,
+            width: 100,
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: Colors.grey[900],
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: participant.isAudioEnabled ? Colors.green : Colors.red,
                 width: 2,
               ),
-              borderRadius: BorderRadius.circular(12),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Stack(
-                children: [
-                  if (renderer != null)
-                    Positioned.fill(
-                      child: RTCVideoView(
-                        renderer,
-                        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                      ),
-                    )
-                  else
-                    Container(
-                      color: Colors.grey[800],
-                      child: Center(
-                        child: CircleAvatar(
-                          radius: 20,
-                          backgroundColor: GcbAppTheme.primary,
-                          child: Text(
-                            participant.name.isNotEmpty ? participant.name[0].toUpperCase() : '?',
-                            style: const TextStyle(fontSize: 16, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ),
-                  // Name overlay
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.8),
-                        borderRadius: const BorderRadius.only(
-                          bottomLeft: Radius.circular(10),
-                          bottomRight: Radius.circular(10),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            participant.isAudioEnabled ? Icons.mic : Icons.mic_off,
-                            color: participant.isAudioEnabled ? Colors.white : Colors.red,
-                            size: 12,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              participant.name,
-                              style: const TextStyle(color: Colors.white, fontSize: 10),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+              borderRadius: BorderRadius.circular(6),
+              child: renderer != null
+                  ? RTCVideoView(renderer)
+                  : Container(
+                color: Colors.grey[800],
+                child: Center(
+                  child: Text(
+                    participant.name.isNotEmpty ? participant.name[0].toUpperCase() : '?',
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
                   ),
-                ],
+                ),
               ),
             ),
           );
@@ -1359,11 +962,10 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  /// Build enhanced control bar with Whisper test features
-  Widget _buildEnhancedControlBar(BuildContext context, MeetingController controller) {
+  Widget _buildControlBar(MeetingController controller) {
     return Container(
       decoration: BoxDecoration(
-        color: GcbAppTheme.background,
+        color: Colors.black.withOpacity(0.9),
         border: Border(
           top: BorderSide(color: Colors.white.withOpacity(0.1), width: 1),
         ),
@@ -1372,7 +974,6 @@ class _MeetingContent extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Microphone
           _buildControlButton(
             icon: controller.isMicOn ? Icons.mic : Icons.mic_off,
             label: 'Mic',
@@ -1380,7 +981,6 @@ class _MeetingContent extends StatelessWidget {
             onPressed: controller.toggleMicrophone,
           ),
 
-          // Camera
           _buildControlButton(
             icon: controller.isCameraOn ? Icons.videocam : Icons.videocam_off,
             label: 'Camera',
@@ -1388,104 +988,87 @@ class _MeetingContent extends StatelessWidget {
             onPressed: controller.toggleCamera,
           ),
 
-          // AI Subtitles with enhanced visual feedback
           _buildControlButton(
-            icon: subtitlesVisible ? Icons.subtitles : Icons.subtitles_off,
-            label: 'AI STT',
-            isActive: subtitlesVisible,
-            isHighlighted: subtitlesVisible && whisperConnected,
-            badge: transcriptionCount > 0 ? transcriptionCount.toString() : null,
-            onPressed: onToggleSubtitles,
+            icon: _areSubtitlesVisible ? Icons.subtitles : Icons.subtitles_off,
+            label: 'Subtitles',
+            isActive: _areSubtitlesVisible,
+            isHighlighted: _areSubtitlesVisible && _transcriptServiceReady,
+            onPressed: () {
+              setState(() {
+                _areSubtitlesVisible = !_areSubtitlesVisible;
+              });
+            },
           ),
 
-          // Chat
           _buildControlButton(
             icon: Icons.chat,
             label: 'Chat',
             isActive: true,
-            isHighlighted: controller.isChatVisible,
-            onPressed: controller.toggleChat,
+            isHighlighted: _isChatVisible,
+            onPressed: () {
+              setState(() {
+                _isChatVisible = !_isChatVisible;
+                if (_isChatVisible) _isParticipantsVisible = false;
+              });
+            },
           ),
 
-          // Participants
           _buildControlButton(
             icon: Icons.people,
             label: 'People',
             isActive: true,
-            isHighlighted: controller.isParticipantsListVisible,
-            onPressed: controller.toggleParticipantsList,
+            isHighlighted: _isParticipantsVisible,
+            onPressed: () {
+              setState(() {
+                _isParticipantsVisible = !_isParticipantsVisible;
+                if (_isParticipantsVisible) _isChatVisible = false;
+              });
+            },
           ),
 
-          // End call
-          _buildEndCallButton(context, controller),
+          _buildEndCallButton(controller),
         ],
       ),
     );
   }
 
-  /// Build control button with optional badge
   Widget _buildControlButton({
     required IconData icon,
     required String label,
     required bool isActive,
     bool isHighlighted = false,
-    String? badge,
     required VoidCallback onPressed,
   }) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Stack(
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                color: isHighlighted
-                    ? GcbAppTheme.primary.withOpacity(0.2)
-                    : isActive
-                    ? Colors.transparent
-                    : Colors.red.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                icon: Icon(
-                  icon,
-                  color: isHighlighted
-                      ? GcbAppTheme.primary
-                      : isActive
-                      ? Colors.white
-                      : Colors.red,
-                  size: 22,
-                ),
-                onPressed: onPressed,
-              ),
+        Container(
+          decoration: BoxDecoration(
+            color: isHighlighted
+                ? _getLanguageColor(_userDisplayLanguage).withOpacity(0.2)
+                : isActive
+                ? Colors.transparent
+                : Colors.red.withOpacity(0.2),
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            icon: Icon(
+              icon,
+              color: isHighlighted
+                  ? _getLanguageColor(_userDisplayLanguage)
+                  : isActive
+                  ? Colors.white
+                  : Colors.red,
+              size: 22,
             ),
-            if (badge != null)
-              Positioned(
-                right: 0,
-                top: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Text(
-                    badge,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-          ],
+            onPressed: onPressed,
+          ),
         ),
         const SizedBox(height: 4),
         Text(
           label,
           style: TextStyle(
-            color: isHighlighted ? GcbAppTheme.primary : Colors.white,
+            color: isHighlighted ? _getLanguageColor(_userDisplayLanguage) : Colors.white,
             fontSize: 11,
             fontWeight: FontWeight.w500,
           ),
@@ -1494,8 +1077,7 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  /// Build end call button
-  Widget _buildEndCallButton(BuildContext context, MeetingController controller) {
+  Widget _buildEndCallButton(MeetingController controller) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1506,7 +1088,7 @@ class _MeetingContent extends StatelessWidget {
           ),
           child: IconButton(
             icon: const Icon(Icons.call_end, color: Colors.white, size: 24),
-            onPressed: () => _showEndCallDialog(context, controller),
+            onPressed: () => _showEndCallDialog(controller),
           ),
         ),
         const SizedBox(height: 4),
@@ -1518,9 +1100,29 @@ class _MeetingContent extends StatelessWidget {
     );
   }
 
-  /// Show end call dialog
-  void _showEndCallDialog(BuildContext context, MeetingController controller) {
-    // Implementation same as before...
+  Widget _buildLanguageSelectionOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.8),
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.all(20),
+            constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+            child: LanguageSelectionWidget(
+              showBeforeMeeting: false,
+              onLanguageSelected: () {
+                setState(() {
+                  _showLanguageSelection = false;
+                });
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showEndCallDialog(MeetingController controller) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1558,5 +1160,47 @@ class _MeetingContent extends StatelessWidget {
         );
       },
     );
+  }
+
+  String _getLanguageName(String languageCode) {
+    const names = {
+      'en': 'English',
+      'vi': 'Tiếng Việt',
+      'fr': 'Français',
+      'es': 'Español',
+      'de': 'Deutsch',
+      'zh': '中文',
+      'ja': '日本語',
+      'ko': '한국어',
+    };
+    return names[languageCode] ?? languageCode.toUpperCase();
+  }
+
+  String _getLanguageFlag(String languageCode) {
+    const flags = {
+      'en': '🇺🇸',
+      'vi': '🇻🇳',
+      'fr': '🇫🇷',
+      'es': '🇪🇸',
+      'de': '🇩🇪',
+      'zh': '🇨🇳',
+      'ja': '🇯🇵',
+      'ko': '🇰🇷',
+    };
+    return flags[languageCode] ?? '🌍';
+  }
+
+  Color _getLanguageColor(String languageCode) {
+    const colors = {
+      'en': Color(0xFF1E88E5),
+      'vi': Color(0xFFD32F2F),
+      'fr': Color(0xFF1976D2),
+      'es': Color(0xFFFF8F00),
+      'de': Color(0xFF424242),
+      'zh': Color(0xFFD32F2F),
+      'ja': Color(0xFFE53935),
+      'ko': Color(0xFF1565C0),
+    };
+    return colors[languageCode] ?? const Color(0xFF64B5F6);
   }
 }

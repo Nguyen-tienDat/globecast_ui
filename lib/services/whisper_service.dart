@@ -804,6 +804,55 @@ class WhisperService extends ChangeNotifier {
       'Languages': '$_nativeLanguage → $_displayLanguage',
     };
   }
+  Future<bool> connectWithUserLanguage({
+    required String userId,
+    required String displayName,
+    required String userPreferredLanguage, // Language user muốn thấy transcript
+    String nativeLanguage = 'auto', // Auto-detect người nói
+  }) async {
+    try {
+      print('🌍 Connecting Whisper with user language preference');
+      print('   User: $displayName ($userId)');
+      print('   Native (auto-detect): $nativeLanguage');
+      print('   Display language: $userPreferredLanguage');
+
+      final connected = await connect(
+        userId: userId,
+        displayName: displayName,
+        nativeLanguage: nativeLanguage, // Auto-detect speaker's language
+        displayLanguage: userPreferredLanguage, // User's preferred language
+      );
+
+      if (connected) {
+        print('✅ Whisper connected with user-specific language settings');
+      }
+
+      return connected;
+    } catch (e) {
+      print('❌ Error connecting Whisper with user language: $e');
+      return false;
+    }
+  }
+
+// ✅ THÊM: Update user's display language during meeting
+  Future<void> updateUserDisplayLanguage(String newLanguage) async {
+    if (!isConnected) {
+      print('⚠️ Whisper not connected, cannot update language');
+      return;
+    }
+
+    try {
+      await setUserLanguages(
+        nativeLanguage: 'auto', // Keep auto-detect
+        displayLanguage: newLanguage, // Update display language
+      );
+
+      print('🌍 Updated user display language to: $newLanguage');
+    } catch (e) {
+      print('❌ Error updating user display language: $e');
+      throw e;
+    }
+  }
 
   @override
   void dispose() {
