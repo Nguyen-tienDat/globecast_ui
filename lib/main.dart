@@ -1,10 +1,11 @@
-// lib/main.dart
+// lib/main.dart - FIXED VERSION
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:globecast_ui/firebase_options.dart';
 import 'package:globecast_ui/router/app_router.dart';
 import 'package:globecast_ui/services/auth_service.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
+import 'package:globecast_ui/services/multilingual_speech_service.dart'; // ✅ Added import
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 
@@ -29,6 +30,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   final AuthService _authService = AuthService();
   final WebRTCMeshMeetingService _webrtcService = WebRTCMeshMeetingService();
+  final MultilingualSpeechService _speechService = MultilingualSpeechService(); // ✅ Added speech service
   final Routes _routes = Routes();
 
   @override
@@ -39,6 +41,7 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _initializeServices() async {
     await _webrtcService.initialize();
+    // Speech service initializes itself in constructor
   }
 
   @override
@@ -47,6 +50,7 @@ class _MyAppState extends State<MyApp> {
       providers: [
         ChangeNotifierProvider.value(value: _authService),
         ChangeNotifierProvider.value(value: _webrtcService),
+        ChangeNotifierProvider.value(value: _speechService), // ✅ Added speech service provider
       ],
       child: Consumer<AuthService>(
         builder: (context, authService, child) {
@@ -66,6 +70,7 @@ class _MyAppState extends State<MyApp> {
   void dispose() {
     _authService.dispose();
     _webrtcService.dispose();
+    _speechService.dispose(); // ✅ Added speech service disposal
     super.dispose();
   }
 }

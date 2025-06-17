@@ -1,4 +1,4 @@
-// lib/routes/routes.dart
+// lib/router/app_router.dart - FIXED VERSION
 import 'package:flutter/material.dart';
 import '../screens/auth/welcome_screen.dart';
 import '../screens/auth/signin_screen.dart';
@@ -24,10 +24,61 @@ class Routes {
     home: (context) => const HomeScreen(),
     joinMeeting: (context) => const JoinMeetingScreen(),
     createMeeting: (context) => const CreateMeetingScreen(),
+
+    // ✅ Simplified meeting route - no unnecessary Consumer wrapper
     meeting: (context) {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+
+      // Extract parameters
       final code = args?['code'] ?? '';
-      return MeetingScreen(code: code);
+      final displayName = args?['displayName'];
+      final targetLanguage = args?['targetLanguage'];
+
+      // Validate required parameter
+      if (code.isEmpty) {
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: Colors.red,
+                  size: 64,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Invalid Meeting Code',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () => Navigator.pushReplacementNamed(context, Routes.home),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                  ),
+                  child: const Text(
+                    'Back to Home',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      // ✅ Direct MeetingScreen instantiation - Provider is available from main.dart
+      return MeetingScreen(
+        code: code,
+        displayName: displayName,
+        targetLanguage: targetLanguage,
+      );
     },
   };
 
