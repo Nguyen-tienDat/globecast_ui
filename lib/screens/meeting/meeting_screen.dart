@@ -1,10 +1,15 @@
-// lib/screens/meeting/meeting_screen.dart - FIXED VERSION
+// lib/screens/meeting/meeting_screen.dart - FIXED VERSION with Live Translation
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
-import 'widgets/translation_overlay.dart';
+import 'package:globecast_ui/services/translation_service.dart';
+import 'package:globecast_ui/services/multilingual_speech_service.dart';
+import 'package:globecast_ui/models/translation_models.dart';
+import 'widgets/live_subtitle_overlay.dart';
+import 'widgets/translation_history_panel.dart';
+import 'widgets/language_settings_panel.dart';
 
 class MeetingScreen extends StatefulWidget {
   final String? code;
@@ -25,8 +30,13 @@ class MeetingScreen extends StatefulWidget {
 }
 
 class _MeetingScreenState extends State<MeetingScreen> {
-  bool _showTranslationOverlay = false;
+  bool _showTranslationHistory = false;
+  bool _showLanguageSettings = false;
   bool _isJoining = false;
+
+  // Services
+  TranslationService? _translationService;
+  MultilingualSpeechService? _speechService;
 
   @override
   void initState() {
@@ -44,23 +54,47 @@ class _MeetingScreenState extends State<MeetingScreen> {
     });
 
     try {
-      final service = context.read<WebRTCMeshMeetingService>();
+      final webrtcService = context.read<WebRTCMeshMeetingService>();
+      _speechService = context.read<MultilingualSpeechService>();
+
+      // Initialize translation service
+      _translationService = TranslationService();
 
       // Set user details if provided
       if (widget.displayName != null) {
-        service.setUserDetails(displayName: widget.displayName!);
+        webrtcService.setUserDetails(displayName: widget.displayName!);
       }
 
       // Join meeting using code or meetingId
       final meetingCode = widget.code ?? widget.meetingId;
       if (meetingCode != null) {
-        await service.joinMeeting(meetingId: meetingCode);
+        await webrtcService.joinMeeting(meetingId: meetingCode);
+
+        // Initialize translation service for this meeting
+        await _translationService!.initializeForMeeting(
+            meetingCode,
+            webrtcService.userId ?? 'unknown'
+        );
+
+        // Connect speech service to translation service
+        _speechService!.setTranslationService(_translationService!);
+        _speechService!.setUserContext(
+            webrtcService.userId ?? 'unknown',
+            widget.displayName ?? 'User'
+        );
+
+        // Set user's target language if provided
+        if (widget.targetLanguage != null) {
+          await _translationService!.updateDisplayLanguage(widget.targetLanguage!);
+        }
+
+        print('✅ Meeting and translation services initialized');
       } else {
         throw Exception('No meeting code provided');
       }
 
       // Debug media stream
-      await service.debugMediaStream();
+      await webrtcService.debugMediaStream();
     } catch (e) {
       print('❌ Error joining meeting: $e');
       if (mounted) {
@@ -79,6 +113,12 @@ class _MeetingScreenState extends State<MeetingScreen> {
         });
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _translationService?.dispose();
+    super.dispose();
   }
 
   @override
@@ -104,14 +144,45 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 ],
               ),
 
-              // Translation overlay (YouTube style)
-              if (_showTranslationOverlay)
-                TranslationOverlay(
-                  onClose: () {
-                    setState(() {
-                      _showTranslationOverlay = false;
-                    });
-                  },
+              // Live subtitle overlay (YouTube style)
+              if (_translationService != null)
+                ChangeNotifierProvider.value(
+                  value: _translationService!,
+                  child: const LiveSubtitleOverlay(),
+                ),
+
+              // Translation history panel (sliding from right)
+              if (_showTranslationHistory && _translationService != null)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: MediaQuery.of(context).size.width * 0.4,
+                  child: ChangeNotifierProvider.value(
+                    value: _translationService!,
+                    child: TranslationHistoryPanel(
+                      onClose: () {
+                        setState(() {
+                          _showTranslationHistory = false;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+
+              // Language settings panel (center overlay)
+              if (_showLanguageSettings && _translationService != null)
+                Positioned.fill(
+                  child: ChangeNotifierProvider.value(
+                    value: _translationService!,
+                    child: LanguageSettingsPanel(
+                      onClose: () {
+                        setState(() {
+                          _showLanguageSettings = false;
+                        });
+                      },
+                    ),
+                  ),
                 ),
             ],
           );
@@ -141,7 +212,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
             ),
             SizedBox(height: 8),
             Text(
-              'Setting up audio and video',
+              'Setting up audio, video and translation',
               style: TextStyle(
                 color: Colors.grey,
                 fontSize: 14,
@@ -188,49 +259,16 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   size: 16,
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  service.meetingId ?? widget.code ?? 'Meeting',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const Spacer(),
-
-          // Connection status
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: Colors.green.withOpacity(0.5),
-                width: 1,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: const BoxDecoration(
-                    color: Colors.green,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  'Connected',
-                  style: TextStyle(
-                    color: Colors.green,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.3),
+                  child: Text(
+                    service.meetingId ?? widget.code ?? 'Meeting',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -239,32 +277,130 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
           const SizedBox(width: 12),
 
-          // Participants count
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: GcbAppTheme.primary.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.people,
-                  color: GcbAppTheme.primary,
-                  size: 16,
+          // Translation status
+          if (_translationService != null)
+            Flexible(
+              child: ChangeNotifierProvider.value(
+                value: _translationService!,
+                child: Consumer<TranslationService>(
+                  builder: (context, translationService, child) {
+                    final userPref = translationService.userPreference;
+                    if (userPref == null) return const SizedBox.shrink();
+
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: GcbAppTheme.primary.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: GcbAppTheme.primary.withOpacity(0.5),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.translate,
+                            color: GcbAppTheme.primary,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            SupportedLanguages.getLanguageFlag(userPref.displayLanguage),
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          const SizedBox(width: 2),
+                          Flexible(
+                            child: Text(
+                              SupportedLanguages.getLanguageName(userPref.displayLanguage),
+                              style: const TextStyle(
+                                color: GcbAppTheme.primary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  '${service.participants.length}',
-                  style: const TextStyle(
-                    color: GcbAppTheme.primary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
+              ),
+            ),
+
+          const Spacer(),
+
+          // Connection status and participants count
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Connection status
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: Colors.green.withOpacity(0.5),
+                    width: 1,
                   ),
                 ),
-              ],
-            ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Colors.green,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Connected',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 12),
+
+              // Participants count
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: GcbAppTheme.primary.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.people,
+                      color: GcbAppTheme.primary,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${service.participants.length}',
+                      style: const TextStyle(
+                        color: GcbAppTheme.primary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -478,7 +614,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
           // Mute button
           _buildControlButton(
             icon: service.isAudioEnabled ? Icons.mic : Icons.mic_off,
-            label: 'Mute',
+            label: 'Mic',
             isActive: service.isAudioEnabled,
             onPressed: () async {
               await service.toggleAudio();
@@ -488,51 +624,54 @@ class _MeetingScreenState extends State<MeetingScreen> {
           // Camera button
           _buildControlButton(
             icon: service.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
-            label: 'Camera On',
+            label: 'Camera',
             isActive: service.isVideoEnabled,
             onPressed: () async {
               await service.toggleVideo();
             },
           ),
 
-          // Chat button (placeholder)
-          _buildControlButton(
-            icon: Icons.chat_bubble_outline,
-            label: 'Chat',
-            isActive: false,
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Chat feature coming soon!'),
-                  duration: Duration(seconds: 2),
-                ),
+          // Speech recognition button
+          Consumer<MultilingualSpeechService>(
+            builder: (context, speechService, child) {
+              return _buildControlButton(
+                icon: speechService.isListening ? Icons.mic_external_on : Icons.mic_external_off,
+                label: 'Speech',
+                isActive: speechService.isListening,
+                onPressed: () async {
+                  // Manual toggle - no continuous mode
+                  await speechService.toggleListening();
+                },
               );
             },
           ),
 
-          // Participants button
+          // Translation history button
           _buildControlButton(
-            icon: Icons.people_outline,
-            label: 'Participants',
-            isActive: false,
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${service.participants.length} participants in meeting'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            },
-          ),
-
-          // Translation button
-          _buildControlButton(
-            icon: Icons.translate,
-            label: 'Language',
-            isActive: _showTranslationOverlay,
+            icon: Icons.history,
+            label: 'History',
+            isActive: _showTranslationHistory,
             onPressed: () {
               setState(() {
-                _showTranslationOverlay = !_showTranslationOverlay;
+                _showTranslationHistory = !_showTranslationHistory;
+                if (_showTranslationHistory) {
+                  _showLanguageSettings = false;
+                }
+              });
+            },
+          ),
+
+          // Language settings button
+          _buildControlButton(
+            icon: Icons.language,
+            label: 'Language',
+            isActive: _showLanguageSettings,
+            onPressed: () {
+              setState(() {
+                _showLanguageSettings = !_showLanguageSettings;
+                if (_showLanguageSettings) {
+                  _showTranslationHistory = false;
+                }
               });
             },
           ),
