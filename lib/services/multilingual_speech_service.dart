@@ -1,12 +1,13 @@
-// lib/services/multilingual_speech_service.dart - FIXED VERSION
+// lib/services/multilingual_speech_service.dart - ENHANCED WITH WEBRTC AUDIO MANAGEMENT
 import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_recognition_error.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'translation_service.dart';
 
 class MultilingualSpeechService extends ChangeNotifier {
-  // Separate Speech-to-Text instance (independent from WebRTC)
+  // Speech-to-Text instance
   late stt.SpeechToText _speech;
   bool _isListening = false;
   bool _isAvailable = false;
@@ -19,9 +20,9 @@ class MultilingualSpeechService extends ChangeNotifier {
   TranslationService? _translationService;
 
   // Performance optimization
-  bool _isSTTEnabled = false; // Only enable when needed
+  bool _isSTTEnabled = false;
   bool _continuousMode = false;
-  int _pauseDuration = 2; // seconds
+  int _pauseDuration = 2;
 
   // Language detection
   String _detectedLanguage = 'en';
@@ -32,6 +33,11 @@ class MultilingualSpeechService extends ChangeNotifier {
   int _retryCount = 0;
   static const int _maxRetries = 3;
   DateTime? _lastErrorTime;
+
+  // 🎯 WEBRTC AUDIO MANAGEMENT - THE TRICK FROM PROJECT 1
+  MediaStream? _webrtcStream;
+  bool _webrtcAudioWasEnabled = true;
+  bool _isManagingWebRTCAudio = false;
 
   // Available languages for STT
   final Map<String, String> _supportedLanguages = {
@@ -85,11 +91,75 @@ class MultilingualSpeechService extends ChangeNotifier {
   String get targetLanguage => _translationService?.userPreference?.displayLanguage ?? 'en';
   bool get isTranslating => false;
 
-  // Constructor - lightweight initialization
+  // Constructor
   MultilingualSpeechService() {
-    // Don't initialize speech immediately to save resources
     if (kDebugMode) {
       print('🎤 Multilingual Speech Service created (STT not initialized)');
+    }
+  }
+
+  // 🎯 SET WEBRTC STREAM - KEY METHOD FOR AUDIO MANAGEMENT
+  void setWebRTCStream(MediaStream? stream) {
+    _webrtcStream = stream;
+    if (kDebugMode) {
+      print('🔗 WebRTC stream ${stream != null ? "connected" : "disconnected"} to Speech service');
+      if (stream != null) {
+        print('   📹 Video tracks: ${stream.getVideoTracks().length}');
+        print('   🎤 Audio tracks: ${stream.getAudioTracks().length}');
+      }
+    }
+  }
+
+  // 🎯 DISABLE WEBRTC AUDIO - THE TRICK!
+  void _disableWebRTCAudio() {
+    if (_webrtcStream == null || _isManagingWebRTCAudio) return;
+
+    try {
+      final audioTracks = _webrtcStream!.getAudioTracks();
+      if (audioTracks.isNotEmpty) {
+        // Store current state
+        _webrtcAudioWasEnabled = audioTracks.first.enabled;
+
+        // Disable ALL audio tracks
+        for (var track in audioTracks) {
+          track.enabled = false;
+        }
+
+        _isManagingWebRTCAudio = true;
+
+        if (kDebugMode) {
+          print('🔇 WebRTC audio disabled for speech recognition (was: $_webrtcAudioWasEnabled)');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ Error disabling WebRTC audio: $e');
+      }
+    }
+  }
+
+  // 🎯 RESTORE WEBRTC AUDIO - THE RESTORATION!
+  void _restoreWebRTCAudio() {
+    if (_webrtcStream == null || !_isManagingWebRTCAudio) return;
+
+    try {
+      final audioTracks = _webrtcStream!.getAudioTracks();
+      if (audioTracks.isNotEmpty) {
+        // Restore previous state
+        for (var track in audioTracks) {
+          track.enabled = _webrtcAudioWasEnabled;
+        }
+
+        _isManagingWebRTCAudio = false;
+
+        if (kDebugMode) {
+          print('🔊 WebRTC audio restored (enabled: $_webrtcAudioWasEnabled)');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ Error restoring WebRTC audio: $e');
+      }
     }
   }
 
@@ -122,7 +192,7 @@ class MultilingualSpeechService extends ChangeNotifier {
         print('🎤 Enabling Speech-to-Text...');
       }
 
-      // Make sure previous instance is properly disposed
+      // Cleanup previous instance
       if (_speech != null) {
         try {
           await _speech.stop();
@@ -134,7 +204,6 @@ class MultilingualSpeechService extends ChangeNotifier {
         }
       }
 
-      // Wait a bit to ensure cleanup
       await Future.delayed(const Duration(milliseconds: 500));
 
       _speech = stt.SpeechToText();
@@ -146,7 +215,7 @@ class MultilingualSpeechService extends ChangeNotifier {
 
       if (_isAvailable) {
         _isSTTEnabled = true;
-        _retryCount = 0; // Reset retry count on success
+        _retryCount = 0;
         if (kDebugMode) {
           print('✅ STT enabled successfully');
         }
@@ -179,22 +248,24 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // Disable STT (to save resources when not needed)
+  // Disable STT
   Future<void> disableSTT() async {
     if (!_isSTTEnabled && !_isInitializing) return;
 
     try {
-      // Stop listening first
       if (_isListening) {
         await stopListening();
       }
 
-      // Wait for any ongoing operations to complete
       await Future.delayed(const Duration(milliseconds: 300));
 
       _isSTTEnabled = false;
       _isAvailable = false;
       _isInitializing = false;
+
+      // Ensure WebRTC audio is restored
+      _restoreWebRTCAudio();
+
       if (kDebugMode) {
         print('🔇 STT disabled to save resources');
       }
@@ -206,9 +277,8 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // Check if we can start listening (with error handling)
+  // Check if we can start listening
   bool _canStartListening() {
-    // Don't start if already listening or initializing
     if (_isListening || _isInitializing) {
       if (kDebugMode) {
         print('⚠️ Cannot start: already listening or initializing');
@@ -216,7 +286,6 @@ class MultilingualSpeechService extends ChangeNotifier {
       return false;
     }
 
-    // Don't start if not available
     if (!_isAvailable || !_isSTTEnabled) {
       if (kDebugMode) {
         print('⚠️ Cannot start: STT not available or enabled');
@@ -224,7 +293,6 @@ class MultilingualSpeechService extends ChangeNotifier {
       return false;
     }
 
-    // Check if we're in error cooldown period
     if (_lastErrorTime != null) {
       final timeSinceError = DateTime.now().difference(_lastErrorTime!);
       if (timeSinceError.inSeconds < 2) {
@@ -235,7 +303,6 @@ class MultilingualSpeechService extends ChangeNotifier {
       }
     }
 
-    // Check retry limit
     if (_retryCount >= _maxRetries) {
       if (kDebugMode) {
         print('⚠️ Cannot start: max retries exceeded');
@@ -246,7 +313,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     return true;
   }
 
-  // Start listening - FIXED WITH BETTER ERROR HANDLING
+  // 🎯 START LISTENING - ENHANCED WITH WEBRTC AUDIO MANAGEMENT
   Future<void> startListening({
     String? locale,
     bool continuous = false,
@@ -263,6 +330,9 @@ class MultilingualSpeechService extends ChangeNotifier {
         print('🎤 Attempting to start listening...');
       }
 
+      // 🎯 THE TRICK: DISABLE WEBRTC AUDIO BEFORE STARTING STT
+      _disableWebRTCAudio();
+
       // Set locale based on user's speaking language preference
       if (_translationService?.userPreference != null) {
         final speakingLang = _translationService!.userPreference!.speakingLanguage;
@@ -273,41 +343,41 @@ class MultilingualSpeechService extends ChangeNotifier {
         _detectedLanguage = locale;
       }
 
-      // CHANGE: Set continuous mode to false for manual control
       _continuousMode = false; // Always use manual mode
 
       // Clear previous text
       _text = '';
       _lastWords = '';
 
-      // FIXED: Use SpeechListenOptions instead of deprecated parameters
       await _speech.listen(
         onResult: _onSpeechResult,
-        listenFor: const Duration(seconds: 30), // Fixed duration
+        listenFor: const Duration(seconds: 30),
         pauseFor: Duration(seconds: _pauseDuration),
         partialResults: true,
         localeId: _currentLocale,
         onSoundLevelChange: _onSoundLevelChange,
-        // REMOVED: cancelOnError and listenMode are deprecated
       );
 
       _isListening = true;
-      _retryCount = 0; // Reset retry count on successful start
+      _retryCount = 0;
       notifyListeners();
 
       if (kDebugMode) {
-        print('🎤 Started listening in $_currentLocale (manual mode)');
+        print('🎤 Started listening in $_currentLocale (WebRTC audio disabled)');
       }
 
     } catch (e) {
       if (kDebugMode) {
         print('❌ Error starting speech recognition: $e');
       }
+
+      // 🎯 RESTORE WEBRTC AUDIO ON ERROR
+      _restoreWebRTCAudio();
+
       _isListening = false;
       _retryCount++;
       _lastErrorTime = DateTime.now();
 
-      // Auto-retry with exponential backoff if not at max retries
       if (_retryCount < _maxRetries) {
         final retryDelay = Duration(seconds: _retryCount * 2);
         if (kDebugMode) {
@@ -325,7 +395,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // Stop listening - IMPROVED
+  // 🎯 STOP LISTENING - ENHANCED WITH WEBRTC AUDIO RESTORATION
   Future<void> stopListening() async {
     if (!_isListening) return;
 
@@ -338,6 +408,9 @@ class MultilingualSpeechService extends ChangeNotifier {
       _isListening = false;
       _continuousMode = false;
 
+      // 🎯 THE RESTORATION: RESTORE WEBRTC AUDIO AFTER STOPPING STT
+      _restoreWebRTCAudio();
+
       // Save final result when manually stopping
       if (_text.isNotEmpty) {
         await _saveTranscriptionToDatabase(true);
@@ -345,20 +418,22 @@ class MultilingualSpeechService extends ChangeNotifier {
 
       notifyListeners();
       if (kDebugMode) {
-        print('🛑 Stopped listening');
+        print('🛑 Stopped listening (WebRTC audio restored)');
       }
 
     } catch (e) {
       if (kDebugMode) {
         print('❌ Error stopping speech recognition: $e');
       }
-      // Force stop
+
+      // Force restore on error
+      _restoreWebRTCAudio();
       _isListening = false;
       notifyListeners();
     }
   }
 
-  // Cancel listening - IMPROVED
+  // 🎯 CANCEL LISTENING - ENHANCED WITH WEBRTC AUDIO RESTORATION
   Future<void> cancelListening() async {
     if (!_isListening) return;
 
@@ -372,17 +447,23 @@ class MultilingualSpeechService extends ChangeNotifier {
       _continuousMode = false;
       _text = '';
       _lastWords = '';
+
+      // 🎯 RESTORE WEBRTC AUDIO ON CANCEL
+      _restoreWebRTCAudio();
+
       notifyListeners();
 
       if (kDebugMode) {
-        print('❌ Cancelled listening');
+        print('❌ Cancelled listening (WebRTC audio restored)');
       }
 
     } catch (e) {
       if (kDebugMode) {
         print('❌ Error cancelling speech recognition: $e');
       }
-      // Force cancel
+
+      // Force restore on error
+      _restoreWebRTCAudio();
       _isListening = false;
       _text = '';
       _lastWords = '';
@@ -390,7 +471,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // Speech status callback - IMPROVED ERROR HANDLING
+  // 🎯 SPEECH STATUS CALLBACK - ENHANCED WITH WEBRTC AUDIO MANAGEMENT
   void _onSpeechStatus(String status) {
     if (kDebugMode) {
       print('🔄 Speech status: $status');
@@ -407,6 +488,8 @@ class MultilingualSpeechService extends ChangeNotifier {
       case 'notListening':
         if (_isListening) {
           _isListening = false;
+          // 🎯 RESTORE WEBRTC AUDIO WHEN NOT LISTENING
+          _restoreWebRTCAudio();
           notifyListeners();
         }
         break;
@@ -414,6 +497,9 @@ class MultilingualSpeechService extends ChangeNotifier {
       case 'done':
       case 'doneNoResult':
         _isListening = false;
+
+        // 🎯 RESTORE WEBRTC AUDIO WHEN DONE
+        _restoreWebRTCAudio();
 
         // Save final result when speech ends
         if (_text.isNotEmpty && status == 'done') {
@@ -425,30 +511,29 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // Speech error callback - FIXED ERROR TYPE ACCESS
+  // 🎯 SPEECH ERROR CALLBACK - ENHANCED WITH WEBRTC AUDIO RESTORATION
   void _onSpeechError(SpeechRecognitionError error) {
     if (kDebugMode) {
-      print('❌ Speech error: ${error.errorMsg} (type: ${error.errorType})');
+      print('❌ Speech error: ${error.errorMsg}');
     }
 
     _isListening = false;
     _lastErrorTime = DateTime.now();
 
-    // FIXED: Use proper error type access
-    final errorTypeString = error.errorType.toString();
+    // 🎯 ALWAYS RESTORE WEBRTC AUDIO ON ERROR
+    _restoreWebRTCAudio();
 
-    // Handle specific error types
+    final errorTypeString = error.errorMsg.toString();
+
     if (errorTypeString.contains('busy')) {
       if (kDebugMode) {
         print('🔄 Speech service busy, will retry...');
       }
       _retryCount++;
 
-      // Retry after a delay if not at max retries
       if (_retryCount < _maxRetries) {
         Future.delayed(Duration(seconds: 2 + _retryCount), () async {
           if (!_isListening) {
-            // Force reinitialize STT
             await disableSTT();
             await Future.delayed(const Duration(milliseconds: 1000));
             await enableSTT();
@@ -473,7 +558,7 @@ class MultilingualSpeechService extends ChangeNotifier {
       }
     } else {
       if (kDebugMode) {
-        print('❓ Unknown error type: ${error.errorType}');
+        print('❓ Unknown error type: ${error.errorMsg}');
       }
       _retryCount++;
     }
@@ -481,7 +566,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Speech result callback - UNCHANGED
+  // Speech result callback - unchanged
   void _onSpeechResult(SpeechRecognitionResult result) {
     _text = result.recognizedWords;
     _lastWords = result.recognizedWords;
@@ -491,7 +576,6 @@ class MultilingualSpeechService extends ChangeNotifier {
       print('🎯 Speech result: "$_text" (confidence: ${(_confidence * 100).toInt()}%)');
     }
 
-    // Only save on final result in manual mode
     if (result.finalResult &&
         _text.isNotEmpty &&
         _translationService != null &&
@@ -500,7 +584,6 @@ class MultilingualSpeechService extends ChangeNotifier {
 
       _saveTranscriptionToDatabase(result.finalResult);
 
-      // Clear text after saving in manual mode
       Future.delayed(const Duration(milliseconds: 500), () {
         _text = '';
         _lastWords = '';
@@ -511,7 +594,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Save transcription to database via translation service
+  // Save transcription to database
   Future<void> _saveTranscriptionToDatabase(bool isFinal) async {
     if (_translationService == null ||
         _currentUserId == null ||
@@ -541,7 +624,6 @@ class MultilingualSpeechService extends ChangeNotifier {
   // Sound level callback
   void _onSoundLevelChange(double level) {
     // Optional: Use this for voice activity indicator
-    // if (kDebugMode) print('🔊 Sound level: $level');
   }
 
   // Manual save current text
@@ -552,12 +634,11 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // Toggle listening - IMPROVED WITH BETTER ERROR HANDLING
+  // Toggle listening
   Future<void> toggleListening() async {
     if (_isListening) {
       await stopListening();
     } else {
-      // Reset retry count when manually toggling
       if (_retryCount >= _maxRetries) {
         _retryCount = 0;
         _lastErrorTime = null;
@@ -611,7 +692,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // Set pause duration for continuous listening
+  // Set pause duration
   void setPauseDuration(int seconds) {
     _pauseDuration = seconds.clamp(1, 10);
     notifyListeners();
@@ -678,37 +759,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     return '';
   }
 
-  void toggleTranslation() {
-    // This is now handled by TranslationService
-    if (kDebugMode) {
-      print('ℹ️ Translation is now managed by TranslationService');
-    }
-  }
-
-  void setSourceLanguage(String languageCode) {
-    setSpeakingLanguage(languageCode);
-  }
-
-  void setTargetLanguage(String languageCode) {
-    // This is now handled by TranslationService
-    if (_translationService != null) {
-      _translationService!.updateDisplayLanguage(languageCode);
-    }
-  }
-
-  void swapLanguages() {
-    // This is now handled by TranslationService
-    if (kDebugMode) {
-      print('ℹ️ Language swapping is now managed by TranslationService');
-    }
-  }
-
-  Future<void> translateCurrentText() async {
-    // This is now handled automatically by TranslationService
-    await saveCurrentText();
-  }
-
-  // Dispose - IMPROVED
+  // 🎯 DISPOSE - ENHANCED WITH WEBRTC AUDIO CLEANUP
   @override
   void dispose() {
     if (kDebugMode) {
@@ -727,6 +778,10 @@ class MultilingualSpeechService extends ChangeNotifier {
       }
     }
 
+    // 🎯 ENSURE WEBRTC AUDIO IS RESTORED ON DISPOSE
+    _restoreWebRTCAudio();
+
+    // Cleanup
     _isSTTEnabled = false;
     _isAvailable = false;
     _isListening = false;
@@ -736,11 +791,36 @@ class MultilingualSpeechService extends ChangeNotifier {
     _currentUserName = null;
     _retryCount = 0;
     _lastErrorTime = null;
+    _webrtcStream = null;
+    _isManagingWebRTCAudio = false;
 
     super.dispose();
   }
-}
 
-extension on SpeechRecognitionError {
-  get errorType => null;
+  // Legacy methods for compatibility
+  void toggleTranslation() {
+    if (kDebugMode) {
+      print('ℹ️ Translation is now managed by TranslationService');
+    }
+  }
+
+  void setSourceLanguage(String languageCode) {
+    setSpeakingLanguage(languageCode);
+  }
+
+  void setTargetLanguage(String languageCode) {
+    if (_translationService != null) {
+      _translationService!.updateDisplayLanguage(languageCode);
+    }
+  }
+
+  void swapLanguages() {
+    if (kDebugMode) {
+      print('ℹ️ Language swapping is now managed by TranslationService');
+    }
+  }
+
+  Future<void> translateCurrentText() async {
+    await saveCurrentText();
+  }
 }

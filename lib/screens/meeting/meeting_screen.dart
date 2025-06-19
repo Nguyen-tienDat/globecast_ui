@@ -1,4 +1,4 @@
-// lib/screens/meeting/meeting_screen.dart - FIXED VERSION with Live Translation
+// lib/screens/meeting/meeting_screen.dart - ENHANCED WITH WEBRTC-SPEECH INTEGRATION
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
@@ -46,6 +46,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
     });
   }
 
+  // 🎯 ENHANCED MEETING INITIALIZATION WITH WEBRTC-SPEECH INTEGRATION
   Future<void> _initializeMeeting() async {
     if (_isJoining) return;
 
@@ -57,6 +58,8 @@ class _MeetingScreenState extends State<MeetingScreen> {
       final webrtcService = context.read<WebRTCMeshMeetingService>();
       _speechService = context.read<MultilingualSpeechService>();
 
+      print('🎯 Starting enhanced meeting initialization...');
+
       // Initialize translation service
       _translationService = TranslationService();
 
@@ -64,6 +67,10 @@ class _MeetingScreenState extends State<MeetingScreen> {
       if (widget.displayName != null) {
         webrtcService.setUserDetails(displayName: widget.displayName!);
       }
+
+      // 🎯 KEY INTEGRATION: CONNECT SPEECH SERVICE TO WEBRTC SERVICE
+      webrtcService.setSpeechService(_speechService!);
+      print('✅ Speech service connected to WebRTC service');
 
       // Join meeting using code or meetingId
       final meetingCode = widget.code ?? widget.meetingId;
@@ -76,7 +83,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
             webrtcService.userId ?? 'unknown'
         );
 
-        // Connect speech service to translation service
+        // 🎯 CONNECT SPEECH SERVICE TO TRANSLATION SERVICE
         _speechService!.setTranslationService(_translationService!);
         _speechService!.setUserContext(
             webrtcService.userId ?? 'unknown',
@@ -89,6 +96,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
         }
 
         print('✅ Meeting and translation services initialized');
+        print('🎯 WebRTC-Speech integration completed successfully');
       } else {
         throw Exception('No meeting code provided');
       }
@@ -212,7 +220,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
             ),
             SizedBox(height: 8),
             Text(
-              'Setting up audio, video and translation',
+              'Setting up audio, video and real-time translation',
               style: TextStyle(
                 color: Colors.grey,
                 fontSize: 14,
@@ -277,7 +285,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
           const SizedBox(width: 12),
 
-          // Translation status
+          // 🎯 ENHANCED TRANSLATION STATUS WITH SPEECH INTEGRATION
           if (_translationService != null)
             Flexible(
               child: ChangeNotifierProvider.value(
@@ -300,10 +308,15 @@ class _MeetingScreenState extends State<MeetingScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
-                            Icons.translate,
-                            color: GcbAppTheme.primary,
-                            size: 14,
+                          // 🎯 SHOW SPEECH STATUS INDICATOR
+                          Consumer<MultilingualSpeechService>(
+                            builder: (context, speechService, child) {
+                              return Icon(
+                                speechService.isListening ? Icons.mic : Icons.translate,
+                                color: speechService.isListening ? Colors.red : GcbAppTheme.primary,
+                                size: 14,
+                              );
+                            },
                           ),
                           const SizedBox(width: 4),
                           Text(
@@ -631,15 +644,29 @@ class _MeetingScreenState extends State<MeetingScreen> {
             },
           ),
 
-          // Speech recognition button
+          // 🎯 ENHANCED SPEECH RECOGNITION BUTTON WITH WEBRTC INTEGRATION
           Consumer<MultilingualSpeechService>(
             builder: (context, speechService, child) {
               return _buildControlButton(
-                icon: speechService.isListening ? Icons.mic_external_on : Icons.mic_external_off,
-                label: 'Speech',
+                icon: speechService.isListening
+                    ? Icons.mic_external_on
+                    : speechService.getSpeechStatus() == 'ready'
+                    ? Icons.mic_external_off
+                    : Icons.mic_off,
+                label: speechService.isListening
+                    ? 'Speaking'
+                    : speechService.getSpeechStatus() == 'ready'
+                    ? 'Speech'
+                    : 'STT Off',
                 isActive: speechService.isListening,
+                badgeText: speechService.getSpeechStatus() == 'error' ? '!' : null,
                 onPressed: () async {
-                  // Manual toggle - no continuous mode
+                  // 🎯 THE MAGIC HAPPENS HERE - WEBRTC AUDIO IS AUTOMATICALLY
+                  // DISABLED/RESTORED BY THE SPEECH SERVICE!
+                  if (speechService.getSpeechStatus() == 'error') {
+                    speechService.resetErrorState();
+                  }
+
                   await speechService.toggleListening();
                 },
               );
@@ -651,6 +678,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
             icon: Icons.history,
             label: 'History',
             isActive: _showTranslationHistory,
+            badgeText: _translationService?.transcriptions.length.toString(),
             onPressed: () {
               setState(() {
                 _showTranslationHistory = !_showTranslationHistory;
@@ -695,6 +723,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
     required String label,
     bool isActive = false,
     bool isDestructive = false,
+    String? badgeText,
     required VoidCallback onPressed,
   }) {
     Color backgroundColor;
@@ -714,27 +743,56 @@ class _MeetingScreenState extends State<MeetingScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        GestureDetector(
-          onTap: onPressed,
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+        Stack(
+          children: [
+            GestureDetector(
+              onTap: onPressed,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-              ],
+                child: Icon(
+                  icon,
+                  color: iconColor,
+                  size: 24,
+                ),
+              ),
             ),
-            child: Icon(
-              icon,
-              color: iconColor,
-              size: 24,
-            ),
-          ),
+
+            // 🎯 BADGE FOR STATUS INDICATORS (e.g., message count, error indicator)
+            if (badgeText != null)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: badgeText == '!' ? Colors.red : GcbAppTheme.primary,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white, width: 1),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                  child: Text(
+                    badgeText,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 8),
         Text(

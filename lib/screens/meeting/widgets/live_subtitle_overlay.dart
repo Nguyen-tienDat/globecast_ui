@@ -1,10 +1,11 @@
-// lib/screens/meeting/widgets/live_subtitle_overlay.dart
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:globecast_ui/services/translation_service.dart';
 import 'package:globecast_ui/models/translation_models.dart';
+import 'package:globecast_ui/screens/meeting/meeting_screen.dart';
+import '../../../services/multilingual_speech_service.dart';
+import '../../../services/webrtc_mesh_meeting_service.dart';
 
 class LiveSubtitleOverlay extends StatefulWidget {
   const LiveSubtitleOverlay({super.key});
@@ -18,13 +19,9 @@ class _LiveSubtitleOverlayState extends State<LiveSubtitleOverlay>
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
 
-  // Keep track of recent subtitles (last 3 lines)
-  final List<LiveSubtitle> _recentSubtitles = [];
-  final int _maxRecentSubtitles = 3;
-
-  // Cache để tránh rebuild không cần thiết
-  List<SpeechTranscription>? _lastTranscriptions;
-  DateTime? _lastUpdateTime;
+  // Keep track of recent transcriptions
+  final int _maxDisplayItems = 3;
+  List<SpeechTranscription> _displayedTranscriptions = [];
 
   @override
   void initState() {
@@ -52,157 +49,96 @@ class _LiveSubtitleOverlayState extends State<LiveSubtitleOverlay>
   Widget build(BuildContext context) {
     return Consumer<TranslationService>(
       builder: (context, translationService, child) {
-        final transcriptions = translationService.getTranscriptionsForUser();
+        // Get recent transcriptions
+        final allTranscriptions = translationService.getTranscriptionsForUser();
 
-        // Kiểm tra xem có cần update không
-        if (_shouldUpdateSubtitles(transcriptions)) {
-          // Sử dụng SchedulerBinding để defer setState sau build phase
-          SchedulerBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              _updateRecentSubtitles(transcriptions, translationService);
-            }
+        // Filter recent ones (last 30 seconds)
+        final now = DateTime.now();
+        final recentTranscriptions = allTranscriptions
+            .where((t) => now.difference(t.timestamp).inSeconds < 30)
+            .toList();
+
+        // Update displayed list
+        if (recentTranscriptions.length != _displayedTranscriptions.length ||
+            !_areListsEqual(recentTranscriptions, _displayedTranscriptions)) {
+          setState(() {
+            _displayedTranscriptions = recentTranscriptions
+                .take(_maxDisplayItems)
+                .toList();
           });
+
+          if (_displayedTranscriptions.isNotEmpty) {
+            _fadeController.forward();
+          } else {
+            _fadeController.reverse();
+          }
         }
 
-        if (_recentSubtitles.isEmpty) {
+        if (_displayedTranscriptions.isEmpty) {
           return const SizedBox.shrink();
         }
 
         return Positioned(
           left: 20,
           right: 20,
-          bottom: 140, // Above bottom controls
-          child: _buildSubtitleContainer(),
-        );
-      },
-    );
-  }
-
-  // Kiểm tra xem có cần update subtitles không
-  bool _shouldUpdateSubtitles(List<SpeechTranscription> transcriptions) {
-    // Nếu chưa có dữ liệu lần trước
-    if (_lastTranscriptions == null) {
-      _lastTranscriptions = List.from(transcriptions);
-      return true;
-    }
-
-    // Kiểm tra xem có thay đổi không
-    if (_lastTranscriptions!.length != transcriptions.length) {
-      _lastTranscriptions = List.from(transcriptions);
-      return true;
-    }
-
-    // Kiểm tra thời gian update cuối
-    final now = DateTime.now();
-    if (_lastUpdateTime == null ||
-        now.difference(_lastUpdateTime!).inMilliseconds > 500) {
-      // Kiểm tra content có thay đổi không
-      for (int i = 0; i < transcriptions.length; i++) {
-        if (i >= _lastTranscriptions!.length ||
-            _lastTranscriptions![i].originalText != transcriptions[i].originalText ||
-            _lastTranscriptions![i].isFinal != transcriptions[i].isFinal) {
-          _lastTranscriptions = List.from(transcriptions);
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  void _updateRecentSubtitles(List<SpeechTranscription> transcriptions, TranslationService translationService) {
-    if (!mounted) return;
-
-    _lastUpdateTime = DateTime.now();
-
-    // Get the latest few transcriptions
-    final recentTranscriptions = transcriptions
-        .where((t) => t.timestamp.isAfter(DateTime.now().subtract(const Duration(seconds: 30))))
-        .toList();
-
-    // Convert to LiveSubtitle objects
-    final newSubtitles = recentTranscriptions.map((transcription) {
-      return LiveSubtitle(
-        id: transcription.id,
-        speakerId: transcription.speakerId,
-        speakerName: transcription.speakerName,
-        text: translationService.getTextForUser(transcription),
-        language: translationService.userPreference?.displayLanguage ?? 'en',
-        timestamp: transcription.timestamp,
-        isCurrentUser: transcription.speakerId == translationService.currentUserId,
-        isFinal: transcription.isFinal,
-      );
-    }).toList();
-
-    // Update recent subtitles list
-    if (mounted) {
-      setState(() {
-        _recentSubtitles.clear();
-        _recentSubtitles.addAll(newSubtitles.take(_maxRecentSubtitles));
-
-        if (_recentSubtitles.isNotEmpty) {
-          _fadeController.forward();
-        } else {
-          _fadeController.reverse();
-        }
-      });
-
-      // Auto-fade out after 10 seconds of no new content
-      Future.delayed(const Duration(seconds: 10), () {
-        if (mounted && _recentSubtitles.isNotEmpty) {
-          final latestTime = _recentSubtitles.last.timestamp;
-          if (DateTime.now().difference(latestTime).inSeconds > 10) {
-            if (mounted) {
-              _fadeController.reverse();
-            }
-          }
-        }
-      });
-    }
-  }
-
-  Widget _buildSubtitleContainer() {
-    return AnimatedBuilder(
-      animation: _fadeAnimation,
-      builder: (context, child) {
-        return Opacity(
-          opacity: _fadeAnimation.value,
-          child: Container(
-            constraints: const BoxConstraints(
-              maxHeight: 200,
-              minHeight: 60,
-            ),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withOpacity(0.0),
-                  Colors.black.withOpacity(0.8),
-                  Colors.black.withOpacity(0.9),
-                ],
-                stops: const [0.0, 0.3, 1.0],
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: _recentSubtitles.map((subtitle) =>
-                    _buildSubtitleLine(subtitle)
-                ).toList(),
-              ),
-            ),
+          bottom: 140,
+          child: AnimatedBuilder(
+            animation: _fadeAnimation,
+            builder: (context, child) {
+              return Opacity(
+                opacity: _fadeAnimation.value,
+                child: Container(
+                  constraints: const BoxConstraints(
+                    maxHeight: 200,
+                    minHeight: 60,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withOpacity(0.0),
+                        Colors.black.withOpacity(0.8),
+                        Colors.black.withOpacity(0.9),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: _displayedTranscriptions.map((transcription) =>
+                          _buildSubtitleLine(transcription, translationService)
+                      ).toList(),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         );
       },
     );
   }
 
-  Widget _buildSubtitleLine(LiveSubtitle subtitle) {
-    final bool isLatest = _recentSubtitles.isNotEmpty && _recentSubtitles.last.id == subtitle.id;
-    final bool isCurrentUser = subtitle.isCurrentUser;
+  bool _areListsEqual(List<SpeechTranscription> list1, List<SpeechTranscription> list2) {
+    if (list1.length != list2.length) return false;
+    for (int i = 0; i < list1.length; i++) {
+      if (list1[i].id != list2[i].id ||
+          list1[i].originalText != list2[i].originalText ||
+          list1[i].isFinal != list2[i].isFinal) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Widget _buildSubtitleLine(SpeechTranscription transcription, TranslationService translationService) {
+    final bool isCurrentUser = transcription.speakerId == translationService.currentUserId;
+    final String displayText = translationService.getTextForUser(transcription);
+    final bool isLatest = _displayedTranscriptions.isNotEmpty &&
+        _displayedTranscriptions.last.id == transcription.id;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -221,21 +157,14 @@ class _LiveSubtitleOverlayState extends State<LiveSubtitleOverlay>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (isCurrentUser)
-                  const Icon(
-                    Icons.person,
-                    color: Colors.white,
-                    size: 12,
-                  )
-                else
-                  Icon(
-                    Icons.person_outline,
-                    color: Colors.grey[300],
-                    size: 12,
-                  ),
+                Icon(
+                  isCurrentUser ? Icons.person : Icons.person_outline,
+                  color: Colors.white,
+                  size: 12,
+                ),
                 const SizedBox(width: 4),
                 Text(
-                  isCurrentUser ? 'You' : subtitle.speakerName,
+                  isCurrentUser ? 'You' : transcription.speakerName,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11,
@@ -269,7 +198,7 @@ class _LiveSubtitleOverlayState extends State<LiveSubtitleOverlay>
                 children: [
                   Expanded(
                     child: Text(
-                      subtitle.text,
+                      displayText,
                       style: TextStyle(
                         color: Colors.black87,
                         fontSize: isLatest ? 16 : 14,
@@ -279,12 +208,30 @@ class _LiveSubtitleOverlayState extends State<LiveSubtitleOverlay>
                     ),
                   ),
 
-                  if (isLatest && !subtitle.isFinal) ...[
+                  // Show loading indicator for non-final text
+                  if (isLatest && !transcription.isFinal) ...[
                     const SizedBox(width: 8),
-                    _buildTypingIndicator(),
+                    SizedBox(
+                      width: 20,
+                      height: 12,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: List.generate(3, (index) {
+                          return Container(
+                            width: 4,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: GcbAppTheme.primary.withOpacity(0.6),
+                              shape: BoxShape.circle,
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
                   ],
 
-                  if (subtitle.language != 'en') ...[
+                  // Translation indicator
+                  if (!isCurrentUser && transcription.originalLanguage != translationService.userPreference?.displayLanguage) ...[
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -295,14 +242,16 @@ class _LiveSubtitleOverlayState extends State<LiveSubtitleOverlay>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
+                          const Icon(
                             Icons.translate,
                             size: 10,
                             color: GcbAppTheme.primary,
                           ),
                           const SizedBox(width: 2),
                           Text(
-                            SupportedLanguages.getLanguageFlag(subtitle.language),
+                            SupportedLanguages.getLanguageFlag(
+                                translationService.userPreference?.displayLanguage ?? 'en'
+                            ),
                             style: const TextStyle(fontSize: 10),
                           ),
                         ],
@@ -314,33 +263,6 @@ class _LiveSubtitleOverlayState extends State<LiveSubtitleOverlay>
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildTypingIndicator() {
-    return SizedBox(
-      width: 20,
-      height: 12,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: List.generate(3, (index) {
-          return AnimatedBuilder(
-            animation: _fadeController,
-            builder: (context, child) {
-              return Container(
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: GcbAppTheme.primary.withOpacity(
-                      0.3 + (0.7 * (((_fadeController.value * 3 + index) % 3) / 3))
-                  ),
-                  shape: BoxShape.circle,
-                ),
-              );
-            },
-          );
-        }),
       ),
     );
   }

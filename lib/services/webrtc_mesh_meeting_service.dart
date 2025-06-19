@@ -1,14 +1,18 @@
-// lib/services/webrtc_mesh_meeting_service.dart - FIXED VERSION
+// lib/services/webrtc_mesh_meeting_service.dart - ENHANCED WITH SPEECH SERVICE INTEGRATION
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:uuid/uuid.dart';
+import 'multilingual_speech_service.dart'; // Import speech service
 
 class WebRTCMeshMeetingService extends ChangeNotifier {
   // Firebase instances
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // 🎯 SPEECH SERVICE INTEGRATION
+  MultilingualSpeechService? _speechService;
 
   // WebRTC Mesh Network - Each peer connects to all other peers
   final Map<String, RTCPeerConnection> _peerConnections = {};
@@ -32,24 +36,14 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   // Stream subscriptions for cleanup
   final List<StreamSubscription> _subscriptions = [];
 
-  // Track negotiation states to prevent race conditions
+  // Track negotiation states
   final Map<String, bool> _negotiationStates = {};
 
   // Connection retry mechanism
   final Map<String, int> _connectionRetryCount = {};
   final int _maxRetryAttempts = 3;
 
-  // Getters
-  String? get meetingId => _meetingId;
-  String? get userId => _userId;
-  bool get isHost => _isHost;
-  bool get isMeetingActive => _isMeetingActive;
-  bool get isAudioEnabled => _isAudioEnabled;
-  bool get isVideoEnabled => _isVideoEnabled;
-  List<MeshParticipant> get participants => List.unmodifiable(_participants);
-  RTCVideoRenderer? get localRenderer => _localRenderer;
-
-  // FIXED: Enhanced ICE Servers configuration
+  // Enhanced ICE Servers configuration
   final Map<String, dynamic> _iceServers = {
     'iceServers': [
       {
@@ -80,6 +74,30 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     'iceCandidatePoolSize': 10,
   };
 
+  // Getters
+  String? get meetingId => _meetingId;
+  String? get userId => _userId;
+  bool get isHost => _isHost;
+  bool get isMeetingActive => _isMeetingActive;
+  bool get isAudioEnabled => _isAudioEnabled;
+  bool get isVideoEnabled => _isVideoEnabled;
+  List<MeshParticipant> get participants => List.unmodifiable(_participants);
+  RTCVideoRenderer? get localRenderer => _localRenderer;
+
+  // 🎯 SET SPEECH SERVICE - KEY INTEGRATION METHOD
+  void setSpeechService(MultilingualSpeechService speechService) {
+    _speechService = speechService;
+
+    // Connect current stream if available
+    if (_localStream != null) {
+      _speechService!.setWebRTCStream(_localStream);
+    }
+
+    if (kDebugMode) {
+      print('🔗 Speech service connected to WebRTC service');
+    }
+  }
+
   // Initialize service
   Future<void> initialize() async {
     try {
@@ -96,7 +114,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   Future<void> debugMediaStream() async {
     print('=== 🔍 MEDIA STREAM DEBUG ===');
 
-    // Check local stream
     if (_localStream != null) {
       print('✅ Local stream exists');
       print('📹 Video tracks: ${_localStream!.getVideoTracks().length}');
@@ -113,7 +130,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       print('❌ Local stream is null');
     }
 
-    // Check local renderer
     if (_localRenderer != null) {
       print('✅ Local renderer exists');
       print('🔗 Renderer srcObject: ${_localRenderer!.srcObject != null ? "Connected" : "Not connected"}');
@@ -121,13 +137,11 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       print('❌ Local renderer is null');
     }
 
-    // Check remote streams
     print('🌐 Remote streams count: ${_remoteStreams.length}');
     _remoteStreams.forEach((peerId, stream) {
       print('🔗 Remote stream $peerId: Video=${stream.getVideoTracks().length}, Audio=${stream.getAudioTracks().length}');
     });
 
-    // Check peer connections
     print('🤝 Peer connections count: ${_peerConnections.length}');
     _peerConnections.forEach((peerId, pc) {
       print('🤝 Peer $peerId connection state: ${pc.connectionState}');
@@ -221,7 +235,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced local stream setup
+  // 🎯 ENHANCED LOCAL STREAM SETUP WITH SPEECH SERVICE INTEGRATION
   Future<void> _setupLocalStream() async {
     try {
       print('🎬 Setting up local stream...');
@@ -297,7 +311,13 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       if (stream != null) {
         _localStream = stream;
 
-        // FIXED: Ensure renderer is properly connected
+        // 🎯 CONNECT STREAM TO SPEECH SERVICE - THE KEY INTEGRATION!
+        if (_speechService != null) {
+          _speechService!.setWebRTCStream(stream);
+          print('🔗 Local stream connected to Speech service');
+        }
+
+        // Ensure renderer is properly connected
         await Future.delayed(const Duration(milliseconds: 100));
         _localRenderer!.srcObject = stream;
 
@@ -309,6 +329,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         print('📊 Stream setup complete:');
         print('   📹 Video tracks: ${stream.getVideoTracks().length} (enabled: $_isVideoEnabled)');
         print('   🎤 Audio tracks: ${stream.getAudioTracks().length} (enabled: $_isAudioEnabled)');
+        print('   🎯 Speech service integration: ${_speechService != null ? "Connected" : "Not connected"}');
 
         notifyListeners();
       } else {
@@ -373,7 +394,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Listen for participants with better error handling
+  // Listen for participants with better error handling
   void _listenForMeshParticipants() {
     if (_meetingId == null) return;
 
@@ -430,9 +451,8 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     _subscriptions.add(subscription);
   }
 
-  // FIXED: Better coordination for connection creation
+  // Better coordination for connection creation
   Future<void> _coordinatedCreateConnection(String peerId) async {
-    // Prevent multiple attempts
     if (_negotiationStates.containsKey(peerId) && _negotiationStates[peerId] == true) {
       print('⚠️ Already creating connection with $peerId');
       return;
@@ -451,7 +471,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced mesh connection creation
+  // Enhanced mesh connection creation
   Future<void> _createMeshConnection(String peerId, {required bool isInitiator}) async {
     try {
       print("🤝 Creating mesh connection with peer: $peerId (initiator: $isInitiator)");
@@ -461,7 +481,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         return;
       }
 
-      // Create peer connection with enhanced configuration
       final pc = await createPeerConnection({
         ..._iceServers,
         'bundlePolicy': 'max-bundle',
@@ -470,16 +489,13 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       _peerConnections[peerId] = pc;
 
-      // Create renderer for remote stream
       final renderer = RTCVideoRenderer();
       await renderer.initialize();
       _remoteRenderers[peerId] = renderer;
 
-      // FIXED: Add tracks BEFORE setting up event handlers
       if (_localStream != null) {
         print('➕ Adding local stream tracks to peer connection...');
 
-        // Add each track individually
         for (var track in _localStream!.getTracks()) {
           try {
             await pc.addTrack(track, _localStream!);
@@ -490,12 +506,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         }
       }
 
-      // Setup event handlers AFTER adding tracks
       _setupPeerConnectionEventHandlers(pc, peerId);
 
-      // FIXED: Better timing for offer creation
       if (isInitiator) {
-        // Wait a bit longer to ensure everything is properly set up
         await Future.delayed(const Duration(milliseconds: 300));
         await _createAndSendOffer(pc, peerId);
       } else {
@@ -509,7 +522,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced event handlers
+  // Enhanced event handlers
   void _setupPeerConnectionEventHandlers(RTCPeerConnection pc, String peerId) {
     pc.onIceConnectionState = (state) {
       print('🧊 ICE connection state with $peerId: $state');
@@ -523,7 +536,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         case RTCIceConnectionState.RTCIceConnectionStateConnected:
         case RTCIceConnectionState.RTCIceConnectionStateCompleted:
           print('✅ Successfully connected to $peerId');
-          _connectionRetryCount[peerId] = 0; // Reset retry count
+          _connectionRetryCount[peerId] = 0;
           break;
         default:
           print('🔄 ICE state: $state');
@@ -537,7 +550,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       }
     };
 
-    // FIXED: Enhanced onTrack handler
     pc.onTrack = (event) {
       print('📺 onTrack event received from $peerId');
       print('   Streams count: ${event.streams.length}');
@@ -550,7 +562,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
         final renderer = _remoteRenderers[peerId];
         if (renderer != null) {
-          // FIXED: Ensure renderer connection happens properly
           Future.delayed(const Duration(milliseconds: 100), () {
             renderer.srcObject = stream;
             print('📺 Remote stream connected to renderer for $peerId');
@@ -562,7 +573,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         print('   📹 Remote video tracks: ${stream.getVideoTracks().length}');
         print('   🎤 Remote audio tracks: ${stream.getAudioTracks().length}');
 
-        // Log track details
         for (var track in stream.getTracks()) {
           print('   Track: ${track.kind} - ${track.id} - enabled: ${track.enabled}');
         }
@@ -581,7 +591,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       }
     };
 
-    // FIXED: Add signaling state handler
     pc.onSignalingState = (state) {
       print('📡 Signaling state with $peerId: $state');
     };
@@ -591,7 +600,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     };
   }
 
-  // FIXED: Enhanced offer creation
+  // Enhanced offer creation
   Future<void> _createAndSendOffer(RTCPeerConnection pc, String peerId) async {
     try {
       if (_negotiationStates[peerId] != true) {
@@ -601,7 +610,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       print('📤 Creating offer for $peerId...');
 
-      // Create offer with specific options
       final offer = await pc.createOffer({
         'offerToReceiveVideo': 1,
         'offerToReceiveAudio': 1,
@@ -683,12 +691,11 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced offer handling
+  // Enhanced offer handling
   Future<void> _handleOffer(String fromId, Map<String, dynamic> message) async {
     try {
       print('📨 Handling offer from $fromId');
 
-      // Create peer connection if doesn't exist
       if (!_peerConnections.containsKey(fromId)) {
         await _createMeshConnection(fromId, isInitiator: false);
       }
@@ -699,15 +706,12 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         return;
       }
 
-      // Check signaling state
       print('📡 Current signaling state with $fromId: ${pc.signalingState}');
 
-      // Set remote description
       final offer = RTCSessionDescription(message['sdp'], message['type']);
       await pc.setRemoteDescription(offer);
       print('✅ Remote description set for offer from $fromId');
 
-      // Create and send answer
       final answer = await pc.createAnswer({
         'offerToReceiveVideo': 1,
         'offerToReceiveAudio': 1,
@@ -731,7 +735,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced answer handling
+  // Enhanced answer handling
   Future<void> _handleAnswer(String fromId, Map<String, dynamic> message) async {
     try {
       print('📨 Handling answer from $fromId');
@@ -760,7 +764,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced ICE candidate handling
+  // Enhanced ICE candidate handling
   Future<void> _handleIceCandidate(String fromId, Map<String, dynamic> message) async {
     try {
       final pc = _peerConnections[fromId];
@@ -769,14 +773,12 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         return;
       }
 
-      // Check if we can add the candidate
       final signalingState = pc.signalingState;
       if (signalingState == RTCSignalingState.RTCSignalingStateClosed) {
         print('⚠️ Connection closed, cannot add ICE candidate from $fromId');
         return;
       }
 
-      // Check if we're in a proper state to add candidates
       if (signalingState == RTCSignalingState.RTCSignalingStateStable ||
           signalingState == RTCSignalingState.RTCSignalingStateHaveRemoteOffer ||
           signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
@@ -829,19 +831,17 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     });
   }
 
-  // FIXED: Enhanced connection failure handling with retry
+  // Enhanced connection failure handling with retry
   void _handleConnectionFailure(String peerId) {
     print('🚨 Handling connection failure with $peerId');
 
     _negotiationStates[peerId] = false;
 
-    // Implement retry logic
     final retryCount = _connectionRetryCount[peerId] ?? 0;
     if (retryCount < _maxRetryAttempts) {
       _connectionRetryCount[peerId] = retryCount + 1;
       print('🔄 Retrying connection with $peerId (attempt ${retryCount + 1}/$_maxRetryAttempts)');
 
-      // Retry after delay
       Future.delayed(Duration(seconds: 2 * (retryCount + 1)), () async {
         await _removeMeshConnection(peerId);
         await _coordinatedCreateConnection(peerId);
@@ -852,7 +852,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced connection removal
+  // Enhanced connection removal
   Future<void> _removeMeshConnection(String peerId) async {
     try {
       print('🗑️ Removing mesh connection with $peerId');
@@ -860,7 +860,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       _negotiationStates.remove(peerId);
       _connectionRetryCount.remove(peerId);
 
-      // Close peer connection
       final pc = _peerConnections[peerId];
       if (pc != null) {
         try {
@@ -871,7 +870,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         _peerConnections.remove(peerId);
       }
 
-      // Stop remote stream
       final stream = _remoteStreams[peerId];
       if (stream != null) {
         try {
@@ -884,7 +882,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         _remoteStreams.remove(peerId);
       }
 
-      // Dispose renderer
       final renderer = _remoteRenderers[peerId];
       if (renderer != null) {
         try {
@@ -901,7 +898,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced audio toggle
+  // 🎯 ENHANCED AUDIO TOGGLE WITH SPEECH SERVICE AWARENESS
   Future<void> toggleAudio() async {
     if (_localStream == null) {
       print('❌ Cannot toggle audio: local stream is null');
@@ -916,11 +913,25 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         print('⚠️ No audio tracks available');
         _isAudioEnabled = false;
       } else {
+        // 🎯 CHECK IF SPEECH SERVICE IS MANAGING AUDIO
+        bool speechIsManaging = false;
+        if (_speechService != null && _speechService!.isListening) {
+          speechIsManaging = true;
+          print('⚠️ Speech service is currently using audio - toggle will be applied after speech recognition ends');
+        }
+
         for (var track in audioTracks) {
           track.enabled = !track.enabled;
           print('🎵 Audio track ${track.id} enabled: ${track.enabled}');
         }
         _isAudioEnabled = audioTracks.first.enabled;
+
+        // 🎯 NOTIFY SPEECH SERVICE ABOUT AUDIO STATE CHANGE
+        if (_speechService != null && !speechIsManaging) {
+          // Update speech service with new stream state
+          _speechService!.setWebRTCStream(_localStream);
+          print('🔗 Updated speech service with new audio state');
+        }
       }
 
       // Update in Firestore
@@ -944,7 +955,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced video toggle
+  // 🎯 ENHANCED VIDEO TOGGLE WITH SPEECH SERVICE AWARENESS
   Future<void> toggleVideo() async {
     if (_localStream == null) {
       print('❌ Cannot toggle video: local stream is null');
@@ -995,7 +1006,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     return _remoteRenderers[participantId];
   }
 
-  // FIXED: Enhanced meeting leave
+  // Enhanced meeting leave
   Future<void> leaveMeeting() async {
     if (_meetingId == null || _userId == null) return;
 
@@ -1033,10 +1044,22 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // FIXED: Enhanced cleanup with better error handling
+  // 🎯 ENHANCED CLEANUP WITH SPEECH SERVICE INTEGRATION
   Future<void> _cleanup() async {
     try {
       print('🧹 Cleaning up mesh resources...');
+
+      // 🎯 DISCONNECT SPEECH SERVICE FIRST
+      if (_speechService != null) {
+        // Stop any active speech recognition
+        if (_speechService!.isListening) {
+          await _speechService!.stopListening();
+        }
+
+        // Disconnect from WebRTC stream
+        _speechService!.setWebRTCStream(null);
+        print('🔗 Speech service disconnected from WebRTC stream');
+      }
 
       // Cancel subscriptions
       for (var subscription in _subscriptions) {
