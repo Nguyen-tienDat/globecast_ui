@@ -1,4 +1,4 @@
-// lib/services/translation_service.dart
+// lib/services/translation_service.dart - FIXED VERSION
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -25,11 +25,15 @@ class TranslationService extends ChangeNotifier {
   String? _currentMeetingId;
   String? _currentUserId;
 
+  // Translation state
+  bool _isTranslating = false;
+
   // Getters
   List<SpeechTranscription> get transcriptions => List.unmodifiable(_transcriptions);
   UserLanguagePreference? get userPreference => _userPreference;
   String? get currentMeetingId => _currentMeetingId;
-  String? get currentUserId => _currentUserId; // Added this getter
+  String? get currentUserId => _currentUserId;
+  bool get isTranslating => _isTranslating;
 
   // Initialize service for a meeting
   Future<void> initializeForMeeting(String meetingId, String userId) async {
@@ -61,13 +65,23 @@ class TranslationService extends ChangeNotifier {
           .get();
 
       if (doc.exists) {
-        _userPreference = UserLanguagePreference.fromFirestore(doc);
+        final data = doc.data()!;
+        _userPreference = UserLanguagePreference(
+          userId: data['userId'] ?? userId,
+          displayLanguage: data['displayLanguage'] ?? 'en',
+          speakingLanguage: data['speakingLanguage'] ?? 'en',
+          autoDetectSpeaking: data['autoDetectSpeaking'] ?? false,
+          enableLiveTranslation: data['enableLiveTranslation'] ?? true,
+          updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        );
       } else {
         // Create default preference
         _userPreference = UserLanguagePreference(
           userId: userId,
           displayLanguage: 'en', // Default to English
           speakingLanguage: 'en',
+          autoDetectSpeaking: false,
+          enableLiveTranslation: true,
           updatedAt: DateTime.now(),
         );
         await _saveUserPreference();
@@ -82,6 +96,8 @@ class TranslationService extends ChangeNotifier {
         userId: userId,
         displayLanguage: 'en',
         speakingLanguage: 'en',
+        autoDetectSpeaking: false,
+        enableLiveTranslation: true,
         updatedAt: DateTime.now(),
       );
     }
@@ -95,7 +111,14 @@ class TranslationService extends ChangeNotifier {
       await _firestore
           .collection('user_preferences')
           .doc(_currentUserId)
-          .set(_userPreference!.toFirestore());
+          .set({
+        'userId': _userPreference!.userId,
+        'displayLanguage': _userPreference!.displayLanguage,
+        'speakingLanguage': _userPreference!.speakingLanguage,
+        'autoDetectSpeaking': _userPreference!.autoDetectSpeaking,
+        'enableLiveTranslation': _userPreference!.enableLiveTranslation,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 
       print('💾 User preference saved');
     } catch (e) {
@@ -158,7 +181,20 @@ class TranslationService extends ChangeNotifier {
 
       for (var change in snapshot.docChanges) {
         if (change.type == DocumentChangeType.added) {
-          final transcription = SpeechTranscription.fromFirestore(change.doc);
+          final data = change.doc.data()!;
+          final transcription = SpeechTranscription(
+            id: data['id'] ?? change.doc.id,
+            meetingId: data['meetingId'] ?? _currentMeetingId!,
+            speakerId: data['speakerId'] ?? '',
+            speakerName: data['speakerName'] ?? 'Unknown',
+            originalText: data['originalText'] ?? '',
+            originalLanguage: data['originalLanguage'] ?? 'en',
+            timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            isFinal: data['isFinal'] ?? true,
+            confidence: (data['confidence'] ?? 1.0).toDouble(),
+            translations: Map<String, String>.from(data['translations'] ?? {}),
+            isActive: data['isActive'] ?? true,
+          );
 
           // Add to local list
           _transcriptions.add(transcription);
@@ -174,7 +210,20 @@ class TranslationService extends ChangeNotifier {
         }
 
         if (change.type == DocumentChangeType.modified) {
-          final transcription = SpeechTranscription.fromFirestore(change.doc);
+          final data = change.doc.data()!;
+          final transcription = SpeechTranscription(
+            id: data['id'] ?? change.doc.id,
+            meetingId: data['meetingId'] ?? _currentMeetingId!,
+            speakerId: data['speakerId'] ?? '',
+            speakerName: data['speakerName'] ?? 'Unknown',
+            originalText: data['originalText'] ?? '',
+            originalLanguage: data['originalLanguage'] ?? 'en',
+            timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            isFinal: data['isFinal'] ?? true,
+            confidence: (data['confidence'] ?? 1.0).toDouble(),
+            translations: Map<String, String>.from(data['translations'] ?? {}),
+            isActive: data['isActive'] ?? true,
+          );
           final index = _transcriptions.indexWhere((t) => t.id == transcription.id);
 
           if (index != -1) {
@@ -225,6 +274,8 @@ class TranslationService extends ChangeNotifier {
         timestamp: DateTime.now(),
         isFinal: isFinal,
         confidence: confidence,
+        translations: {},
+        isActive: true,
       );
 
       // Save to Firestore
@@ -233,7 +284,19 @@ class TranslationService extends ChangeNotifier {
           .doc(_currentMeetingId)
           .collection('transcriptions')
           .doc(transcriptionId)
-          .set(transcription.toFirestore());
+          .set({
+        'id': transcription.id,
+        'meetingId': transcription.meetingId,
+        'speakerId': transcription.speakerId,
+        'speakerName': transcription.speakerName,
+        'originalText': transcription.originalText,
+        'originalLanguage': transcription.originalLanguage,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isFinal': transcription.isFinal,
+        'confidence': transcription.confidence,
+        'translations': transcription.translations,
+        'isActive': transcription.isActive,
+      });
 
       print('💾 Transcription saved: $transcriptionId');
 
@@ -273,9 +336,10 @@ class TranslationService extends ChangeNotifier {
               .get();
 
           if (prefDoc.exists) {
-            final pref = UserLanguagePreference.fromFirestore(prefDoc);
-            if (pref.enableLiveTranslation) {
-              targetLanguages.add(pref.displayLanguage);
+            final data = prefDoc.data()!;
+            final enableLiveTranslation = data['enableLiveTranslation'] ?? true;
+            if (enableLiveTranslation) {
+              targetLanguages.add(data['displayLanguage'] ?? 'en');
             }
           } else {
             targetLanguages.add('en'); // Default to English
@@ -350,7 +414,7 @@ class TranslationService extends ChangeNotifier {
     }
   }
 
-  // Translate text with caching
+  // Translate text with caching using Google Translator
   Future<String> _translateText(String text, String fromLang, String toLang) async {
     if (text.trim().isEmpty || fromLang == toLang) {
       return text;
@@ -364,20 +428,31 @@ class TranslationService extends ChangeNotifier {
     }
 
     try {
+      _isTranslating = true;
+      notifyListeners();
+
+      print('🌐 Google Translator: "$text" ($fromLang → $toLang)');
+
       final translation = await _translator.translate(
         text,
         from: fromLang,
         to: toLang,
       );
 
+      final translatedText = translation.text;
+
       // Cache the result
       _translationCache.putIfAbsent(fromLang, () => {});
-      _translationCache[fromLang]![cacheKey] = translation.text;
+      _translationCache[fromLang]![cacheKey] = translatedText;
 
-      return translation.text;
+      print('✅ Translation result: "$translatedText"');
+      return translatedText;
     } catch (e) {
       print('❌ Translation error ($fromLang → $toLang): $e');
       return text; // Return original text as fallback
+    } finally {
+      _isTranslating = false;
+      notifyListeners();
     }
   }
 
@@ -463,12 +538,36 @@ class TranslationService extends ChangeNotifier {
     );
   }
 
+  // Get translation statistics
+  Map<String, dynamic> getTranslationStats() {
+    final totalTranscriptions = _transcriptions.length;
+    final ownTranscriptions = _transcriptions.where((t) => t.speakerId == _currentUserId).length;
+    final translatedTranscriptions = _transcriptions.where((t) =>
+    t.speakerId != _currentUserId &&
+        t.hasTranslation(_userPreference?.displayLanguage ?? 'en')).length;
+
+    final languageDistribution = <String, int>{};
+    for (final transcription in _transcriptions) {
+      final lang = transcription.originalLanguage;
+      languageDistribution[lang] = (languageDistribution[lang] ?? 0) + 1;
+    }
+
+    return {
+      'totalTranscriptions': totalTranscriptions,
+      'ownTranscriptions': ownTranscriptions,
+      'translatedTranscriptions': translatedTranscriptions,
+      'totalTranslations': translatedTranscriptions,
+      'languageDistribution': languageDistribution,
+    };
+  }
+
   // Cleanup resources
-  Future<void> dispose() async {
+  @override
+  void dispose() {
     print('🧹 Disposing Translation Service...');
 
     for (var subscription in _subscriptions) {
-      await subscription.cancel();
+      subscription.cancel();
     }
     _subscriptions.clear();
 

@@ -1,0 +1,293 @@
+# Test Case: Auto-Translation to Personal Language Preference
+
+## TC051: Personal Language Translation - Each User Sees Everything in Their Chosen Language
+
+### **Scenario Description**
+5 người tham gia cuộc họp, mỗi người nói ngôn ngữ khác nhau và đặt ngôn ngữ hiển thị khác nhau. Hệ thống phải tự động dịch TẤT CẢ audio/subtitle từ người khác sang ngôn ngữ mà từng người đã chọn.
+
+### **Test Participants & Language Settings**
+1. **Minh (Vietnam)**
+   - Speaks: Vietnamese
+   - Display Language Setting: **Vietnamese**
+   - Expects to see: All others' speech translated TO Vietnamese
+
+2. **John (USA)**
+   - Speaks: English
+   - Display Language Setting: **English**
+   - Expects to see: All others' speech translated TO English
+
+3. **Maria (Spain)**
+   - Speaks: Spanish
+   - Display Language Setting: **Spanish**
+   - Expects to see: All others' speech translated TO Spanish
+
+4. **Yuki (Japan)**
+   - Speaks: Japanese
+   - Display Language Setting: **Korean** (she prefers Korean)
+   - Expects to see: All others' speech translated TO Korean
+
+5. **Ahmed (Egypt)**
+   - Speaks: Arabic
+   - Display Language Setting: **French** (he's fluent in French)
+   - Expects to see: All others' speech translated TO French
+
+### **Test Execution**
+
+#### **Step 1: Language Preference Setup**
+Each participant opens GlobeCast app and sets their preferred display language:
+- Minh: Settings → Display Language → Vietnamese ✅
+- John: Settings → Display Language → English ✅
+- Maria: Settings → Display Language → Spanish ✅
+- Yuki: Settings → Display Language → Korean ✅
+- Ahmed: Settings → Display Language → French ✅
+
+#### **Step 2: Join Meeting Room**
+All participants join room "GlobalTest2024"
+
+#### **Step 3: Real Conversation Test**
+
+**Minh speaks in Vietnamese:**
+```
+"Xin chào mọi người, tôi là Minh từ Việt Nam. Hôm nay chúng ta thảo luận về dự án mới."
+```
+
+**What each person should see on their screen:**
+
+**Minh's Screen (Vietnamese):**
+```
+🎤 Minh: "Xin chào mọi người, tôi là Minh từ Việt Nam. Hôm nay chúng ta thảo luận về dự án mới."
+```
+
+**John's Screen (English):**
+```
+🎤 Minh: "Hello everyone, I'm Minh from Vietnam. Today we discuss the new project."
+```
+
+**Maria's Screen (Spanish):**
+```
+🎤 Minh: "Hola a todos, soy Minh de Vietnam. Hoy discutimos el nuevo proyecto."
+```
+
+**Yuki's Screen (Korean):**
+```
+🎤 Minh: "안녕하세요 여러분, 저는 베트남에서 온 민입니다. 오늘 새 프로젝트에 대해 논의합니다."
+```
+
+**Ahmed's Screen (French):**
+```
+🎤 Minh: "Bonjour tout le monde, je suis Minh du Vietnam. Aujourd'hui nous discutons du nouveau projet."
+```
+
+---
+
+**John responds in English:**
+```
+"Thanks Minh. I'm John from New York. What's the project timeline?"
+```
+
+**What each person should see:**
+
+**Minh's Screen (Vietnamese):**
+```
+🎤 John: "Cảm ơn Minh. Tôi là John từ New York. Timeline của dự án là gì?"
+```
+
+**John's Screen (English):**
+```
+🎤 John: "Thanks Minh. I'm John from New York. What's the project timeline?"
+```
+
+**Maria's Screen (Spanish):**
+```
+🎤 John: "Gracias Minh. Soy John de Nueva York. ¿Cuál es el cronograma del proyecto?"
+```
+
+**Yuki's Screen (Korean):**
+```
+🎤 John: "민 고마워요. 저는 뉴욕에서 온 존입니다. 프로젝트 일정이 어떻게 되나요?"
+```
+
+**Ahmed's Screen (French):**
+```
+🎤 John: "Merci Minh. Je suis John de New York. Quel est le calendrier du projet?"
+```
+
+---
+
+**Maria speaks in Spanish:**
+```
+"Hola John. Creo que necesitamos 3 meses para completar todo."
+```
+
+**What each person should see:**
+
+**Minh's Screen (Vietnamese):**
+```
+🎤 Maria: "Chào John. Tôi nghĩ chúng ta cần 3 tháng để hoàn thành mọi thứ."
+```
+
+**John's Screen (English):**
+```
+🎤 Maria: "Hi John. I think we need 3 months to complete everything."
+```
+
+**Maria's Screen (Spanish):**
+```
+🎤 Maria: "Hola John. Creo que necesitamos 3 meses para completar todo."
+```
+
+**Yuki's Screen (Korean):**
+```
+🎤 Maria: "안녕 존. 모든 것을 완료하는 데 3개월이 필요하다고 생각해요."
+```
+
+**Ahmed's Screen (French):**
+```
+🎤 Maria: "Salut John. Je pense qu'il nous faut 3 mois pour tout terminer."
+```
+
+---
+
+**Yuki speaks in Japanese:**
+```
+"マリアさん、3ヶ月は短すぎると思います。もう少し時間が必要では？"
+```
+
+**What each person should see:**
+
+**Minh's Screen (Vietnamese):**
+```
+🎤 Yuki: "Maria, tôi nghĩ 3 tháng là quá ngắn. Chúng ta có cần thêm thời gian không?"
+```
+
+**John's Screen (English):**
+```
+🎤 Yuki: "Maria, I think 3 months is too short. Don't we need more time?"
+```
+
+**Maria's Screen (Spanish):**
+```
+🎤 Yuki: "Maria, creo que 3 meses es demasiado corto. ¿No necesitamos más tiempo?"
+```
+
+**Yuki's Screen (Korean):**
+```
+🎤 Yuki: "마리아, 3달은 너무 짧다고 생각해요. 시간이 더 필요하지 않을까요?"
+```
+
+**Ahmed's Screen (French):**
+```
+🎤 Yuki: "Maria, je pense que 3 mois c'est trop court. N'avons-nous pas besoin de plus de temps?"
+```
+
+---
+
+**Ahmed speaks in Arabic:**
+```
+"أعتقد أن يوكي محقة. نحتاج إلى أربعة أشهر على الأقل لضمان الجودة."
+```
+
+**What each person should see:**
+
+**Minh's Screen (Vietnamese):**
+```
+🎤 Ahmed: "Tôi nghĩ Yuki đúng. Chúng ta cần ít nhất 4 tháng để đảm bảo chất lượng."
+```
+
+**John's Screen (English):**
+```
+🎤 Ahmed: "I think Yuki is right. We need at least 4 months to ensure quality."
+```
+
+**Maria's Screen (Spanish):**
+```
+🎤 Ahmed: "Creo que Yuki tiene razón. Necesitamos al menos 4 meses para asegurar la calidad."
+```
+
+**Yuki's Screen (Korean):**
+```
+🎤 Ahmed: "유키가 맞다고 생각해요. 품질을 보장하려면 최소 4개월은 필요해요."
+```
+
+**Ahmed's Screen (French):**
+```
+🎤 Ahmed: "Je pense que Yuki a raison. Nous avons besoin d'au moins 4 mois pour assurer la qualité."
+```
+
+### **Success Criteria**
+
+#### **Core Functionality:**
+- ✅ Each user sees ALL content translated to their chosen display language
+- ✅ Original speaker sees their own speech in original language (no self-translation)
+- ✅ Translation happens automatically without manual selection
+- ✅ Real-time translation with <3 second latency
+
+#### **Translation Matrix Verification:**
+```
+Speaker → Listener Display Language
+Vietnamese → English: ✅
+Vietnamese → Spanish: ✅
+Vietnamese → Korean: ✅
+Vietnamese → French: ✅
+English → Vietnamese: ✅
+English → Spanish: ✅
+English → Korean: ✅
+English → French: ✅
+Spanish → Vietnamese: ✅
+Spanish → English: ✅
+Spanish → Korean: ✅
+Spanish → French: ✅
+Japanese → Vietnamese: ✅
+Japanese → English: ✅
+Japanese → Spanish: ✅
+Japanese → Korean: ✅
+Japanese → French: ✅
+Arabic → Vietnamese: ✅
+Arabic → English: ✅
+Arabic → Spanish: ✅
+Arabic → Korean: ✅
+Arabic → French: ✅
+```
+
+#### **User Experience:**
+- ✅ No confusion about who said what
+- ✅ Natural conversation flow despite multiple languages
+- ✅ Each person can participate fully in their preferred language
+- ✅ Translation quality maintains context and meaning
+
+### **Technical Validation**
+
+#### **Backend Processing:**
+1. Audio from Speaker A → Speech-to-Text (Original Language)
+2. Original Text → Translation Engine → Target Language for each listener
+3. Translated text → Display on each user's screen simultaneously
+4. Original speaker sees original text, others see translated versions
+
+#### **Expected System Behavior:**
+- **5 audio streams** (input from each speaker)
+- **20 translation processes** (4 target languages × 5 speakers)
+- **Simultaneous display** across all 5 devices
+- **Language detection** and **context preservation**
+
+### **Pass/Fail Criteria**
+
+**PASS:**
+- Every participant can follow the entire conversation in their chosen language
+- Translation accuracy >80% for all language pairs
+- No technical delays >3 seconds
+- All 20 translation combinations work correctly
+
+**FAIL:**
+- Any participant sees untranslated content in wrong language
+- Translation errors cause misunderstanding
+- System crashes under multilingual load
+- Significant delays disrupting conversation flow
+
+### **Real-World Impact Test**
+After 30 minutes of natural conversation, each participant should be able to:
+- Summarize what others said accurately
+- Respond appropriately to questions/comments
+- Feel like they participated in a natural conversation
+- Confirm they understood key points and decisions
+
+This test validates the core promise: **"Speak your language, understand everyone else's language automatically."**

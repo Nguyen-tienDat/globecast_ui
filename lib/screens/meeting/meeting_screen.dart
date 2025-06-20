@@ -1,4 +1,4 @@
-// lib/screens/meeting/meeting_screen.dart - ENHANCED WITH WEBRTC-SPEECH INTEGRATION
+// lib/screens/meeting/meeting_screen.dart - CLEAN PRODUCTION VERSION
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
@@ -30,13 +30,13 @@ class MeetingScreen extends StatefulWidget {
 }
 
 class _MeetingScreenState extends State<MeetingScreen> {
+  // UI state
   bool _showTranslationHistory = false;
   bool _showLanguageSettings = false;
   bool _isJoining = false;
 
   // Services
   TranslationService? _translationService;
-  MultilingualSpeechService? _speechService;
 
   @override
   void initState() {
@@ -46,7 +46,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
     });
   }
 
-  // 🎯 ENHANCED MEETING INITIALIZATION WITH WEBRTC-SPEECH INTEGRATION
   Future<void> _initializeMeeting() async {
     if (_isJoining) return;
 
@@ -56,53 +55,46 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
     try {
       final webrtcService = context.read<WebRTCMeshMeetingService>();
-      _speechService = context.read<MultilingualSpeechService>();
+      final speechService = context.read<MultilingualSpeechService>();
 
-      print('🎯 Starting enhanced meeting initialization...');
+      print('🎯 Initializing meeting with real-time translation...');
 
-      // Initialize translation service
-      _translationService = TranslationService();
-
-      // Set user details if provided
+      // Set user details
       if (widget.displayName != null) {
         webrtcService.setUserDetails(displayName: widget.displayName!);
       }
 
-      // 🎯 KEY INTEGRATION: CONNECT SPEECH SERVICE TO WEBRTC SERVICE
-      webrtcService.setSpeechService(_speechService!);
-      print('✅ Speech service connected to WebRTC service');
-
-      // Join meeting using code or meetingId
+      // Join meeting
       final meetingCode = widget.code ?? widget.meetingId;
       if (meetingCode != null) {
         await webrtcService.joinMeeting(meetingId: meetingCode);
 
-        // Initialize translation service for this meeting
+        // Initialize translation service
+        _translationService = TranslationService();
         await _translationService!.initializeForMeeting(
             meetingCode,
             webrtcService.userId ?? 'unknown'
         );
 
-        // 🎯 CONNECT SPEECH SERVICE TO TRANSLATION SERVICE
-        _speechService!.setTranslationService(_translationService!);
-        _speechService!.setUserContext(
+        // Set user's language preferences
+        if (widget.targetLanguage != null) {
+          await _translationService!.updateDisplayLanguage(widget.targetLanguage!);
+          await _translationService!.updateSpeakingLanguage(widget.targetLanguage!);
+        }
+
+        // Connect services
+        speechService.setTranslationService(_translationService!);
+        speechService.setUserContext(
             webrtcService.userId ?? 'unknown',
             widget.displayName ?? 'User'
         );
+        webrtcService.setSpeechService(speechService);
 
-        // Set user's target language if provided
-        if (widget.targetLanguage != null) {
-          await _translationService!.updateDisplayLanguage(widget.targetLanguage!);
-        }
-
-        print('✅ Meeting and translation services initialized');
-        print('🎯 WebRTC-Speech integration completed successfully');
+        print('✅ Meeting initialized with multilingual support');
       } else {
         throw Exception('No meeting code provided');
       }
 
-      // Debug media stream
-      await webrtcService.debugMediaStream();
     } catch (e) {
       print('❌ Error joining meeting: $e');
       if (mounted) {
@@ -152,14 +144,14 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 ],
               ),
 
-              // Live subtitle overlay (YouTube style)
+              // Live subtitle overlay
               if (_translationService != null)
                 ChangeNotifierProvider.value(
                   value: _translationService!,
                   child: const LiveSubtitleOverlay(),
                 ),
 
-              // Translation history panel (sliding from right)
+              // Translation history panel
               if (_showTranslationHistory && _translationService != null)
                 Positioned(
                   right: 0,
@@ -178,7 +170,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   ),
                 ),
 
-              // Language settings panel (center overlay)
+              // Language settings panel
               if (_showLanguageSettings && _translationService != null)
                 Positioned.fill(
                   child: ChangeNotifierProvider.value(
@@ -220,11 +212,12 @@ class _MeetingScreenState extends State<MeetingScreen> {
             ),
             SizedBox(height: 8),
             Text(
-              'Setting up audio, video and real-time translation',
+              'Setting up real-time translation',
               style: TextStyle(
                 color: Colors.grey,
                 fontSize: 14,
               ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -285,7 +278,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
           const SizedBox(width: 12),
 
-          // 🎯 ENHANCED TRANSLATION STATUS WITH SPEECH INTEGRATION
+          // Translation status
           if (_translationService != null)
             Flexible(
               child: ChangeNotifierProvider.value(
@@ -308,7 +301,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // 🎯 SHOW SPEECH STATUS INDICATOR
+                          // Speech status indicator
                           Consumer<MultilingualSpeechService>(
                             builder: (context, speechService, child) {
                               return Icon(
@@ -345,7 +338,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
           const Spacer(),
 
-          // Connection status and participants count
+          // Connection status and participants
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -463,6 +456,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
         },
       );
     } else {
+      // Support 5+ participants (mesh topology can handle up to 6-8)
       return GridView.builder(
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
@@ -524,7 +518,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 ),
               ),
 
-            // Overlay info
+            // Participant info overlay
             Positioned(
               bottom: 8,
               left: 8,
@@ -624,7 +618,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Mute button
+          // Microphone button
           _buildControlButton(
             icon: service.isAudioEnabled ? Icons.mic : Icons.mic_off,
             label: 'Mic',
@@ -644,7 +638,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
             },
           ),
 
-          // 🎯 ENHANCED SPEECH RECOGNITION BUTTON WITH WEBRTC INTEGRATION
+          // Speech recognition button
           Consumer<MultilingualSpeechService>(
             builder: (context, speechService, child) {
               return _buildControlButton(
@@ -661,12 +655,9 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 isActive: speechService.isListening,
                 badgeText: speechService.getSpeechStatus() == 'error' ? '!' : null,
                 onPressed: () async {
-                  // 🎯 THE MAGIC HAPPENS HERE - WEBRTC AUDIO IS AUTOMATICALLY
-                  // DISABLED/RESTORED BY THE SPEECH SERVICE!
                   if (speechService.getSpeechStatus() == 'error') {
                     speechService.resetErrorState();
                   }
-
                   await speechService.toggleListening();
                 },
               );
@@ -768,8 +759,8 @@ class _MeetingScreenState extends State<MeetingScreen> {
               ),
             ),
 
-            // 🎯 BADGE FOR STATUS INDICATORS (e.g., message count, error indicator)
-            if (badgeText != null)
+            // Status badge
+            if (badgeText != null && badgeText.isNotEmpty && badgeText != '0')
               Positioned(
                 right: 0,
                 top: 0,
