@@ -1,4 +1,4 @@
-// lib/screens/meeting/meeting_screen.dart - CLEAN PRODUCTION VERSION
+// lib/screens/meeting/meeting_screen.dart - UNIFIED LAYOUT
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +6,7 @@ import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
 import 'package:globecast_ui/services/translation_service.dart';
 import 'package:globecast_ui/services/multilingual_speech_service.dart';
+import 'package:globecast_ui/services/demo_transcript_service.dart';
 import 'package:globecast_ui/models/translation_models.dart';
 import 'widgets/live_subtitle_overlay.dart';
 import 'widgets/translation_history_panel.dart';
@@ -34,6 +35,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
   bool _showTranslationHistory = false;
   bool _showLanguageSettings = false;
   bool _isJoining = false;
+  bool _demoGenerated = false;
 
   // Services
   TranslationService? _translationService;
@@ -91,6 +93,10 @@ class _MeetingScreenState extends State<MeetingScreen> {
         webrtcService.setSpeechService(speechService);
 
         print('✅ Meeting initialized with multilingual support');
+
+        // 🎭 GENERATE DEMO TRANSCRIPTS FOR BOTH CREATOR AND JOINER
+        await _generateDemoTranscripts(meetingCode, webrtcService.userId ?? 'unknown');
+
       } else {
         throw Exception('No meeting code provided');
       }
@@ -112,6 +118,50 @@ class _MeetingScreenState extends State<MeetingScreen> {
           _isJoining = false;
         });
       }
+    }
+  }
+
+  // 🎭 ENHANCED DEMO GENERATION - WORKS FOR BOTH CREATOR AND JOINER
+  Future<void> _generateDemoTranscripts(String meetingId, String userId) async {
+    if (_demoGenerated || _translationService == null) return;
+
+    try {
+      print('🎭 Generating demo transcripts for user language: ${widget.targetLanguage}...');
+      _demoGenerated = true;
+
+      // Get user's target language (critical fix)
+      final userLanguage = widget.targetLanguage ?? 'en';
+      final userName = widget.displayName ?? 'You';
+
+      print('🌍 User selected language: $userLanguage');
+      print('👤 User name: $userName');
+
+      // 🔧 ALWAYS generate demo regardless of meeting ID
+      // Generate quick demo for immediate display
+      await DemoTranscriptService.generateQuickDemo(
+        translationService: _translationService!,
+        userDisplayLanguage: userLanguage,
+        currentUserId: userId,
+        customUserName: userName,
+      );
+
+      print('✅ Quick demo generated for: $userLanguage');
+
+      // Wait a bit, then generate additional conversations
+      Future.delayed(const Duration(seconds: 3), () async {
+        if (mounted && _translationService != null) {
+          await DemoTranscriptService.generateCrossLanguageDemo(
+            translationService: _translationService!,
+            userDisplayLanguage: userLanguage,
+            meetingId: meetingId,
+            currentUserId: userId,
+          );
+          print('✅ Cross-language demo generated');
+        }
+      });
+
+    } catch (e) {
+      print('❌ Error generating demo transcripts: $e');
     }
   }
 
@@ -144,7 +194,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 ],
               ),
 
-              // Live subtitle overlay
+              // Live subtitle overlay - ALWAYS SHOW
               if (_translationService != null)
                 ChangeNotifierProvider.value(
                   value: _translationService!,
@@ -194,15 +244,15 @@ class _MeetingScreenState extends State<MeetingScreen> {
   Widget _buildLoadingScreen() {
     return Container(
       color: GcbAppTheme.background,
-      child: const Center(
+      child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(
+            const CircularProgressIndicator(
               color: GcbAppTheme.primary,
             ),
-            SizedBox(height: 24),
-            Text(
+            const SizedBox(height: 24),
+            const Text(
               'Joining meeting...',
               style: TextStyle(
                 color: Colors.white,
@@ -210,15 +260,33 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
-              'Setting up real-time translation',
-              style: TextStyle(
+              'Setting up real-time translation for ${widget.targetLanguage != null ? SupportedLanguages.getLanguageName(widget.targetLanguage!) : 'your language'}',
+              style: const TextStyle(
                 color: Colors.grey,
                 fontSize: 14,
               ),
               textAlign: TextAlign.center,
             ),
+            if (_demoGenerated) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: GcbAppTheme.primary.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: GcbAppTheme.primary.withOpacity(0.5)),
+                ),
+                child: Text(
+                  '🌍 Generating conversation in ${SupportedLanguages.getLanguageName(widget.targetLanguage ?? 'en')}...',
+                  style: TextStyle(
+                    color: GcbAppTheme.primary,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -278,7 +346,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
           const SizedBox(width: 12),
 
-          // Translation status
+          // Translation status with language flag
           if (_translationService != null)
             Flexible(
               child: ChangeNotifierProvider.value(
@@ -413,6 +481,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
     );
   }
 
+  // Rest of the methods remain the same...
   Widget _buildVideoGrid(WebRTCMeshMeetingService service) {
     final participants = service.participants;
 
@@ -456,7 +525,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
         },
       );
     } else {
-      // Support 5+ participants (mesh topology can handle up to 6-8)
       return GridView.builder(
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,

@@ -194,7 +194,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                     style: const TextStyle(color: Colors.white),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     isExpanded: true,
-                    items: ['English', 'Spanish', 'French', 'German', 'Chinese']
+                    items: ['French', 'Spanish', 'English', 'German', 'Chinese']
                         .map((String value) {
                       return DropdownMenuItem<String>(
                         value: value,
