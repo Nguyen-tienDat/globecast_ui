@@ -1,9 +1,11 @@
-// lib/services/multilingual_speech_service.dart - INTEGRATED WITH GOOGLE CLOUD
+// lib/services/multilingual_speech_service.dart - ENHANCED WITH AUDIO CAPTURE
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'google_cloud_speech_service.dart';
 import 'google_cloud_translation_service.dart';
+import 'audio_capture_service.dart';
 
 class SpeechResult {
   final String originalText;
@@ -12,6 +14,8 @@ class SpeechResult {
   final double confidence;
   final DateTime timestamp;
   final bool isFinal;
+  final String userId;
+  final String userName;
 
   SpeechResult({
     required this.originalText,
@@ -20,6 +24,8 @@ class SpeechResult {
     required this.confidence,
     required this.timestamp,
     required this.isFinal,
+    required this.userId,
+    required this.userName,
   });
 
   Map<String, dynamic> toJson() => {
@@ -29,6 +35,8 @@ class SpeechResult {
     'confidence': confidence,
     'timestamp': timestamp.millisecondsSinceEpoch,
     'isFinal': isFinal,
+    'userId': userId,
+    'userName': userName,
   };
 
   factory SpeechResult.fromJson(Map<String, dynamic> json) => SpeechResult(
@@ -38,6 +46,8 @@ class SpeechResult {
     confidence: (json['confidence'] ?? 0.0).toDouble(),
     timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp'] ?? 0),
     isFinal: json['isFinal'] ?? false,
+    userId: json['userId'] ?? '',
+    userName: json['userName'] ?? '',
   );
 }
 
@@ -45,6 +55,9 @@ class MultilingualSpeechService extends ChangeNotifier {
   // 🚀 GOOGLE CLOUD SERVICES
   final GoogleCloudSpeechService _speechService = GoogleCloudSpeechService.instance;
   final GoogleCloudTranslationService _translationService = GoogleCloudTranslationService.instance;
+
+  // 🎤 AUDIO CAPTURE SERVICE
+  final AudioCaptureService _audioCapture = AudioCaptureService();
 
   // Service state
   bool _isInitialized = false;
@@ -68,6 +81,13 @@ class MultilingualSpeechService extends ChangeNotifier {
   final StreamController<SpeechResult> _speechResultController = StreamController<SpeechResult>.broadcast();
   final StreamController<String> _statusController = StreamController<String>.broadcast();
 
+  // Audio processing
+  StreamSubscription<Uint8List>? _audioSubscription;
+  StreamSubscription<Map<String, dynamic>>? _audioStatusSubscription;
+  final List<Uint8List> _audioBuffer = [];
+  Timer? _processingTimer;
+  static const int AUDIO_CHUNK_DURATION_MS = 2000; // Process every 2 seconds
+
   // Getters for UI integration
   bool get isInitialized => _isInitialized;
   bool get isListening => _isListening;
@@ -88,15 +108,21 @@ class MultilingualSpeechService extends ChangeNotifier {
     try {
       if (_isInitialized) return;
 
-      _updateStatus('Initializing Google Cloud services...');
+      _updateStatus('Initializing services...');
 
       // Initialize Google Cloud services
       await _speechService.initialize();
       await _translationService.initialize();
 
+      // Initialize audio capture service
+      await _audioCapture.initialize();
+
       if (!_speechService.isReady || !_translationService.isReady) {
         throw Exception('Google Cloud services not ready');
       }
+
+      // Setup audio capture listeners
+      _setupAudioListeners();
 
       _isInitialized = true;
       _speechStatus = 'ready';
@@ -104,7 +130,7 @@ class MultilingualSpeechService extends ChangeNotifier {
       notifyListeners();
 
       if (kDebugMode) {
-        print('✅ MultilingualSpeechService initialized with Google Cloud');
+        print('✅ MultilingualSpeechService initialized with Google Cloud + Audio Capture');
       }
     } catch (e) {
       _speechStatus = 'error';
@@ -113,6 +139,56 @@ class MultilingualSpeechService extends ChangeNotifier {
         print('❌ Failed to initialize MultilingualSpeechService: $e');
       }
       rethrow;
+    }
+  }
+
+  // 🎯 SETUP AUDIO LISTENERS
+  void _setupAudioListeners() {
+    // Listen to audio chunks for Google Cloud processing
+    _audioSubscription = _audioCapture.getAudioChunksForGoogleCloud().listen(
+          (audioData) => _processAudioChunk(audioData),
+      onError: (error) {
+        if (kDebugMode) {
+          print('❌ Audio chunk error: $error');
+        }
+        _updateStatus('Audio processing error: $error');
+      },
+    );
+
+    // Listen to audio capture status
+    _audioStatusSubscription = _audioCapture.statusStream.listen(
+          (status) => _handleAudioStatus(status),
+      onError: (error) {
+        if (kDebugMode) {
+          print('❌ Audio status error: $error');
+        }
+      },
+    );
+
+    if (kDebugMode) {
+      print('🎧 Audio listeners setup complete');
+    }
+  }
+
+  // 🎯 HANDLE AUDIO STATUS CHANGES
+  void _handleAudioStatus(Map<String, dynamic> status) {
+    final String type = status['type'] ?? '';
+
+    switch (type) {
+      case 'status_change':
+        if (status['isRecording'] == true && !status['isPaused']) {
+          _speechStatus = 'listening';
+        } else if (status['isRecording'] == false) {
+          _speechStatus = 'ready';
+        }
+        notifyListeners();
+        break;
+
+      case 'error':
+        _speechStatus = 'error';
+        _updateStatus('Audio error: ${status['error']}');
+        notifyListeners();
+        break;
     }
   }
 
@@ -135,10 +211,9 @@ class MultilingualSpeechService extends ChangeNotifier {
 
   // 🎯 SET WEBRTC STREAM (for compatibility)
   void setWebRTCStream(dynamic stream) {
-    // In Google Cloud implementation, we don't need WebRTC stream
-    // This is for compatibility with existing WebRTC integration
+    // This integration uses native audio capture instead of WebRTC stream
     if (kDebugMode) {
-      print('🔗 WebRTC stream reference set (using Google Cloud STT)');
+      print('🔗 WebRTC stream reference set (using native audio capture)');
     }
   }
 
@@ -165,7 +240,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 🎤 START LISTENING
+  // 🎤 START LISTENING - ENHANCED WITH NATIVE AUDIO CAPTURE
   Future<void> startListening({
     String? meetingId,
     String? userId,
@@ -188,18 +263,21 @@ class MultilingualSpeechService extends ChangeNotifier {
       _currentUserId = userId ?? _currentUserId;
       _preferredLanguage = preferredLanguage ?? _preferredLanguage;
 
-      _updateStatus('Starting to listen...');
+      _updateStatus('Starting audio capture...');
 
-      // 🧪 TEST SPEECH-TO-TEXT WITH GOOGLE CLOUD
-      await _testSpeechToText();
+      // Start native audio recording
+      await _audioCapture.startRecording();
+
+      // Start audio processing timer
+      _startAudioProcessingTimer();
 
       _isListening = true;
       _speechStatus = 'listening';
       notifyListeners();
 
-      _updateStatus('Listening...');
+      _updateStatus('Listening with native audio capture...');
       if (kDebugMode) {
-        print('🎤 Started listening (language: $_preferredLanguage)');
+        print('🎤 Started listening with native audio capture (language: $_preferredLanguage)');
       }
 
     } catch (e) {
@@ -217,7 +295,17 @@ class MultilingualSpeechService extends ChangeNotifier {
     try {
       if (!_isListening) return;
 
-      _updateStatus('Processing final results...');
+      _updateStatus('Stopping audio capture...');
+
+      // Stop audio processing timer
+      _processingTimer?.cancel();
+      _processingTimer = null;
+
+      // Process any remaining audio buffer
+      await _processRemainingAudio();
+
+      // Stop native audio recording
+      await _audioCapture.stopRecording();
 
       _isListening = false;
       _speechStatus = 'ready';
@@ -237,97 +325,149 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // 🧪 TEST SPEECH-TO-TEXT WITH GOOGLE CLOUD
-  Future<void> _testSpeechToText() async {
-    try {
-      _updateStatus('Testing speech recognition...');
+  // ⏰ START AUDIO PROCESSING TIMER
+  void _startAudioProcessingTimer() {
+    _processingTimer = Timer.periodic(
+      Duration(milliseconds: AUDIO_CHUNK_DURATION_MS),
+          (timer) async {
+        if (_isListening && _audioBuffer.isNotEmpty) {
+          await _processBufferedAudio();
+        }
+      },
+    );
+  }
 
-      // Test transcripts in different languages
-      final testTranscripts = [
-        'Hello, this is a test of Google Cloud Speech-to-Text service.',
-        'Xin chào, đây là bài kiểm tra dịch vụ Google Cloud.',
-        'こんにちは、これはGoogle Cloudのテストです。',
-        '안녕하세요, Google Cloud 테스트입니다.',
-      ];
+  // 🎵 PROCESS AUDIO CHUNK
+  Future<void> _processAudioChunk(Uint8List audioData) async {
+    if (!_isListening) return;
 
-      for (final transcript in testTranscripts) {
-        await _processTestTranscript(transcript);
-        // Small delay between tests
-        await Future.delayed(const Duration(seconds: 2));
-      }
+    // Add to buffer for batch processing
+    _audioBuffer.add(audioData);
 
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Error in speech-to-text test: $e');
-      }
-      rethrow;
+    if (kDebugMode) {
+      print('🎵 Audio chunk received: ${audioData.length} bytes');
     }
   }
 
-  // 🧪 PROCESS TEST TRANSCRIPT
-  Future<void> _processTestTranscript(String transcript) async {
+  // 🔄 PROCESS BUFFERED AUDIO
+  Future<void> _processBufferedAudio() async {
+    if (_audioBuffer.isEmpty) return;
+
     try {
+      // Combine all buffered audio chunks
+      final int totalSize = _audioBuffer.fold(0, (sum, chunk) => sum + chunk.length);
+      final Uint8List combinedAudio = Uint8List(totalSize);
+
+      int offset = 0;
+      for (final chunk in _audioBuffer) {
+        combinedAudio.setRange(offset, offset + chunk.length, chunk);
+        offset += chunk.length;
+      }
+
+      // Clear buffer
+      _audioBuffer.clear();
+
       if (kDebugMode) {
-        print('🧪 Processing test transcript: "$transcript"');
+        print('🔄 Processing combined audio: $totalSize bytes');
       }
 
-      _currentText = transcript;
-      notifyListeners();
+      // Send to Google Cloud Speech-to-Text
+      await _processWithGoogleCloud(combinedAudio);
 
-      _updateStatus('Detecting language...');
-
-      // Detect language using Google Cloud
-      final detectedLanguage = await _translationService.detectLanguage(transcript);
-
-      _updateStatus('Translating to target languages...');
-
-      // Translate to all target languages
-      final translations = <String, String>{};
-
-      for (final targetLang in _targetLanguages) {
-        if (targetLang != detectedLanguage) {
-          final translated = await _translationService.translateText(
-            text: transcript,
-            targetLanguage: targetLang,
-            sourceLanguage: detectedLanguage,
-          );
-          translations[targetLang] = translated;
-        } else {
-          translations[targetLang] = transcript; // Original text
-        }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error processing buffered audio: $e');
       }
+    }
+  }
 
-      // Create speech result
-      final result = SpeechResult(
-        originalText: transcript,
-        detectedLanguage: detectedLanguage,
-        translations: translations,
-        confidence: 0.95, // Simulated confidence for test
-        timestamp: DateTime.now(),
-        isFinal: true,
+  // 🏁 PROCESS REMAINING AUDIO
+  Future<void> _processRemainingAudio() async {
+    if (_audioBuffer.isNotEmpty) {
+      await _processBufferedAudio();
+    }
+  }
+
+  // ☁️ PROCESS WITH GOOGLE CLOUD
+  Future<void> _processWithGoogleCloud(Uint8List audioData) async {
+    try {
+      _updateStatus('Processing with Google Cloud Speech...');
+
+      // Convert audio to text using Google Cloud Speech-to-Text
+      final String transcript = await _speechService.speechToText(
+        audioData: audioData,
+        languageCode: _getLanguageCode(_preferredLanguage),
+        sampleRateHertz: AudioCaptureService.SAMPLE_RATE,
       );
 
-      // Broadcast result
-      _speechResultController.add(result);
+      if (transcript.isNotEmpty) {
+        _currentText = transcript;
+        notifyListeners();
 
-      // Save to database if in meeting context
-      if (_currentMeetingId.isNotEmpty && _translationContext != null) {
-        await _saveToDatabase(result);
-      }
+        if (kDebugMode) {
+          print('📝 Transcript: "$transcript"');
+        }
 
-      _updateStatus('Translation completed');
+        _updateStatus('Detecting language and translating...');
 
-      if (kDebugMode) {
-        print('✅ Processed test transcript successfully');
-        print('   🔍 Detected: $detectedLanguage');
-        print('   🌐 Translations: ${translations.length} languages');
+        // Detect language using Google Cloud Translation
+        final String detectedLanguage = await _translationService.detectLanguage(transcript);
+
+        // Translate to all target languages
+        final Map<String, String> translations = {};
+
+        for (final targetLang in _targetLanguages) {
+          if (targetLang != detectedLanguage) {
+            final translated = await _translationService.translateText(
+              text: transcript,
+              targetLanguage: targetLang,
+              sourceLanguage: detectedLanguage,
+            );
+            translations[targetLang] = translated;
+          } else {
+            translations[targetLang] = transcript; // Original text
+          }
+        }
+
+        // Create speech result
+        final result = SpeechResult(
+          originalText: transcript,
+          detectedLanguage: detectedLanguage,
+          translations: translations,
+          confidence: 0.95, // Google Cloud provides confidence, using simulated for now
+          timestamp: DateTime.now(),
+          isFinal: true,
+          userId: _currentUserId,
+          userName: _currentUserName,
+        );
+
+        // Broadcast result
+        _speechResultController.add(result);
+
+        // Save to database if in meeting context
+        if (_currentMeetingId.isNotEmpty && _translationContext != null) {
+          await _saveToDatabase(result);
+        }
+
+        _updateStatus('Translation completed');
+
+        if (kDebugMode) {
+          print('✅ Speech result processed successfully');
+          print('   🔍 Detected: $detectedLanguage');
+          print('   🌐 Translations: ${translations.length} languages');
+        }
+
+      } else {
+        if (kDebugMode) {
+          print('⚠️ No transcript received from Google Cloud');
+        }
       }
 
     } catch (e) {
       _speechStatus = 'error';
-      _updateStatus('Processing error: $e');
+      _updateStatus('Google Cloud processing error: $e');
       if (kDebugMode) {
-        print('❌ Error processing test transcript: $e');
+        print('❌ Error processing with Google Cloud: $e');
       }
     }
   }
@@ -341,8 +481,6 @@ class MultilingualSpeechService extends ChangeNotifier {
           .collection('transcriptions')
           .add({
         ...result.toJson(),
-        'userId': _currentUserId,
-        'userName': _currentUserName,
         'meetingId': _currentMeetingId,
         'context': _translationContext,
       });
@@ -433,69 +571,101 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
+  // 🧪 PROCESS TEST TRANSCRIPT (for testing without audio)
+  Future<void> _processTestTranscript(String transcript) async {
+    try {
+      if (kDebugMode) {
+        print('🧪 Processing test transcript: "$transcript"');
+      }
+
+      _currentText = transcript;
+      notifyListeners();
+
+      _updateStatus('Detecting language...');
+
+      // Detect language using Google Cloud
+      final detectedLanguage = await _translationService.detectLanguage(transcript);
+
+      _updateStatus('Translating to target languages...');
+
+      // Translate to all target languages
+      final translations = <String, String>{};
+
+      for (final targetLang in _targetLanguages) {
+        if (targetLang != detectedLanguage) {
+          final translated = await _translationService.translateText(
+            text: transcript,
+            targetLanguage: targetLang,
+            sourceLanguage: detectedLanguage,
+          );
+          translations[targetLang] = translated;
+        } else {
+          translations[targetLang] = transcript; // Original text
+        }
+      }
+
+      // Create speech result
+      final result = SpeechResult(
+        originalText: transcript,
+        detectedLanguage: detectedLanguage,
+        translations: translations,
+        confidence: 0.95, // Simulated confidence for test
+        timestamp: DateTime.now(),
+        isFinal: true,
+        userId: _currentUserId,
+        userName: _currentUserName,
+      );
+
+      // Broadcast result
+      _speechResultController.add(result);
+
+      // Save to database if in meeting context
+      if (_currentMeetingId.isNotEmpty && _translationContext != null) {
+        await _saveToDatabase(result);
+      }
+
+      _updateStatus('Translation completed');
+
+      if (kDebugMode) {
+        print('✅ Processed test transcript successfully');
+        print('   🔍 Detected: $detectedLanguage');
+        print('   🌐 Translations: ${translations.length} languages');
+      }
+
+    } catch (e) {
+      _speechStatus = 'error';
+      _updateStatus('Processing error: $e');
+      if (kDebugMode) {
+        print('❌ Error processing test transcript: $e');
+      }
+    }
+  }
+
   // 🧹 CLEANUP
   @override
   void dispose() {
+    if (kDebugMode) {
+      print('🧹 Disposing MultilingualSpeechService...');
+    }
+
     stopListening();
+
+    // Cancel subscriptions
+    _audioSubscription?.cancel();
+    _audioStatusSubscription?.cancel();
+
+    // Cancel timers
+    _processingTimer?.cancel();
+
+    // Close controllers
     _speechResultController.close();
     _statusController.close();
+
+    // Dispose services
+    _audioCapture.dispose();
     _speechService.dispose();
     _translationService.dispose();
+
     super.dispose();
-    if (kDebugMode) {
-      print('🧹 MultilingualSpeechService disposed');
-    }
   }
 }
-
-/*
-🎯 INTEGRATION SUMMARY:
-
-✅ **Google Cloud Services**:
-- Uses GoogleCloudSpeechService for speech-to-text
-- Uses GoogleCloudTranslationService for translation
-- Supports 100+ languages via Google Cloud
-
-✅ **Test Mode**:
-- testTranslation() method for direct testing
-- _testSpeechToText() for automated testing
-- Real-time result broadcasting
-
-✅ **Compatibility**:
-- Maintains existing method signatures
-- Works with existing UI components
-- Compatible with WebRTC integration
-
-✅ **Firebase Integration**:
-- Saves results to Firestore
-- Real-time result streaming
-- Meeting context support
-
-🚀 **USAGE**:
-
-```dart
-// Initialize and test
-final speechService = MultilingualSpeechService();
-await speechService.initialize();
-
-// Test with Google Cloud
-await speechService.testTranslation('Hello world!');
-
-// Listen to results
-speechService.speechResultStream.listen((result) {
-  print('Original: ${result.originalText}');
-  print('Vietnamese: ${result.translations['vi']}');
-  print('Chinese: ${result.translations['zh']}');
-});
-
-// Start/stop listening
-await speechService.startListening(meetingId: 'test123');
-await speechService.stopListening();
-```
-
-🔧 **NEXT STEPS**:
-1. Update UI to use new result format
-2. Add real audio recording integration
-3. Implement continuous speech recognition
-4. Add more language options
-*/
