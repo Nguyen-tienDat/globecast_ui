@@ -1,4 +1,4 @@
-// lib/widgets/auth_wrapper.dart - ENHANCED FOR PRODUCTION
+// lib/widgets/auth_wrapper.dart - FIXED AND ENHANCED
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../screens/auth/welcome_screen.dart';
@@ -15,7 +15,7 @@ class AuthWrapper extends StatelessWidget {
       builder: (context, authService, child) {
         // Show loading screen while checking auth state
         if (authService.isLoading) {
-          return _buildLoadingScreen();
+          return _buildAuthLoadingScreen();
         }
 
         // Navigate based on authentication status
@@ -28,7 +28,7 @@ class AuthWrapper extends StatelessWidget {
     );
   }
 
-  Widget _buildLoadingScreen() {
+  Widget _buildAuthLoadingScreen() {
     return Scaffold(
       backgroundColor: GcbAppTheme.background,
       body: Center(
@@ -85,10 +85,37 @@ class AuthWrapper extends StatelessWidget {
 
             // Loading text
             Text(
-              'Loading...',
+              'Checking authentication...',
               style: TextStyle(
                 color: Colors.grey[400],
                 fontSize: 14,
+              ),
+            ),
+
+            const SizedBox(height: 32),
+
+            // Auth status
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.security, color: Colors.blue, size: 16),
+                  SizedBox(width: 8),
+                  Text(
+                    'Secure Firebase Authentication',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

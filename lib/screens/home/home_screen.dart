@@ -1,9 +1,11 @@
-// lib/screens/home/enhanced_home_screen.dart
+// lib/screens/home/home_screen.dart - COMPLETE FIXED VERSION
 import 'package:flutter/material.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import '../../router/app_router.dart';
 import '../../services/auth_service.dart';
+
+import '../test/test_screen.dart';
 
 class EnhancedHomeScreen extends StatelessWidget {
   const EnhancedHomeScreen({super.key});
@@ -34,6 +36,11 @@ class EnhancedHomeScreen extends StatelessWidget {
 
                         // Quick Actions
                         _buildQuickActions(context),
+
+                        const SizedBox(height: 32),
+
+                        // Speech Translation Test Section
+                        _buildSpeechTestSection(context),
 
                         const SizedBox(height: 32),
 
@@ -91,7 +98,7 @@ class EnhancedHomeScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'GlobeCast',
+                    'GlobeCast V2',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 18,
@@ -99,7 +106,7 @@ class EnhancedHomeScreen extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'Translation Meetings',
+                    'Google Speech + MLKit',
                     style: TextStyle(
                       color: Colors.grey,
                       fontSize: 11,
@@ -264,7 +271,7 @@ class EnhancedHomeScreen extends StatelessWidget {
         Text(
           authService.isAuthenticated
               ? 'Welcome back, ${authService.displayName?.split(' ').first ?? 'User'}!'
-              : 'Welcome to GlobeCast',
+              : 'Welcome to GlobeCast V2',
           style: const TextStyle(
             color: Colors.white,
             fontSize: 28,
@@ -274,8 +281,8 @@ class EnhancedHomeScreen extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           authService.isAuthenticated
-              ? 'Ready to connect with the world?'
-              : 'Break language barriers in real-time video meetings',
+              ? 'Ready to connect with real-time translation?'
+              : 'Google Speech + MLKit powered real-time translation',
           style: TextStyle(
             color: Colors.grey[400],
             fontSize: 16,
@@ -383,6 +390,159 @@ class EnhancedHomeScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSpeechTestSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Speech Translation Testing',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: GcbAppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.green.withOpacity(0.3),
+              width: 2,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.science,
+                      color: Colors.green,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Google Speech + MLKit Test',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          'Test real-time speech recognition and translation',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              // Features list
+              _buildFeatureRow('🎤', 'Google Cloud Speech-to-Text'),
+              _buildFeatureRow('🌐', 'MLKit On-device Translation'),
+              _buildFeatureRow('🔄', 'Real-time Processing'),
+              _buildFeatureRow('📱', 'Multi-language Support'),
+
+              const SizedBox(height: 16),
+
+              // Test button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SpeechTranslationTestScreen(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.play_arrow, size: 20),
+                  label: const Text('Test Speech Translation'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Info note
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info, color: Colors.blue, size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Uses Google Speech API with your credentials and MLKit for on-device translation',
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFeatureRow(String emoji, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 16)),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -557,7 +717,7 @@ class EnhancedHomeScreen extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Why Choose GlobeCast?',
+          'Why Choose GlobeCast V2?',
           style: TextStyle(
             color: Colors.white,
             fontSize: 20,
@@ -569,22 +729,29 @@ class EnhancedHomeScreen extends StatelessWidget {
         _buildFeatureItem(
           icon: Icons.translate,
           title: 'Real-time Translation',
-          description: 'Speak your language, understand everyone else\'s automatically',
+          description: 'Google Speech + MLKit for accurate live translation',
           color: Colors.blue,
         ),
         const SizedBox(height: 12),
         _buildFeatureItem(
           icon: Icons.cloud,
           title: 'Powered by Google Cloud AI',
-          description: 'High accuracy speech recognition and translation',
+          description: 'High accuracy speech recognition with Google Speech API',
           color: Colors.green,
+        ),
+        const SizedBox(height: 12),
+        _buildFeatureItem(
+          icon: Icons.phone_android,
+          title: 'On-device Translation',
+          description: 'MLKit translation works offline for privacy and speed',
+          color: Colors.purple,
         ),
         const SizedBox(height: 12),
         _buildFeatureItem(
           icon: Icons.group,
           title: 'Global Collaboration',
           description: 'Connect with people worldwide without language barriers',
-          color: Colors.purple,
+          color: Colors.orange,
         ),
 
         const SizedBox(height: 24),

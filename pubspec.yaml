@@ -42,7 +42,7 @@ dependencies:
   flutter_screenutil: ^5.9.3
   cached_network_image: ^3.4.1
   shimmer: ^3.0.0
-  lottie: ^3.3.1
+  #lottie: ^3.3.1
   flutter_animate: ^4.5.2
   gap: ^3.0.1
   phosphor_flutter: ^2.1.0
@@ -78,8 +78,12 @@ dependencies:
   intl: ^0.20.2
 
   googleapis: ^14.0.0
-  googleapis_auth: ^2.0.0
+  #googleapis_auth: ^2.0.0
   http: ^1.4.0
+
+  google_speech: ^5.3.0
+  google_mlkit_translation: ^0.13.0
+  record: ^6.0.0
 
 
 dev_dependencies:
