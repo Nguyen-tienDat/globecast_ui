@@ -1,25 +1,28 @@
-// lib/services/webrtc_mesh_meeting_service.dart - ENHANCED WITH SPEECH SERVICE INTEGRATION
+// lib/services/webrtc_mesh_meeting_service.dart - FIXED INITIALIZATION
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:uuid/uuid.dart';
-import 'multilingual_speech_service.dart'; // Import speech service
+import 'multilingual_speech_service.dart';
 
 class WebRTCMeshMeetingService extends ChangeNotifier {
-  // Firebase instances
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // 🎯 SPEECH SERVICE INTEGRATION
   MultilingualSpeechService? _speechService;
 
-  // WebRTC Mesh Network - Each peer connects to all other peers
+  // WebRTC components
   final Map<String, RTCPeerConnection> _peerConnections = {};
   final Map<String, MediaStream> _remoteStreams = {};
   final Map<String, RTCVideoRenderer> _remoteRenderers = {};
   MediaStream? _localStream;
   RTCVideoRenderer? _localRenderer;
+
+  // 🚀 INITIALIZATION STATE
+  bool _isInitialized = false;
+  bool _isInitializing = false;
 
   // Meeting data
   String? _meetingId;
@@ -27,8 +30,8 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   String _displayName = 'User';
   bool _isHost = false;
   bool _isMeetingActive = false;
-  bool _isAudioEnabled = true;
-  bool _isVideoEnabled = true;
+  bool _isAudioEnabled = true; // ✅ DEFAULT TO TRUE
+  bool _isVideoEnabled = true; // ✅ DEFAULT TO TRUE
 
   // Participants
   final List<MeshParticipant> _participants = [];
@@ -43,7 +46,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   final Map<String, int> _connectionRetryCount = {};
   final int _maxRetryAttempts = 3;
 
-  // Enhanced ICE Servers configuration
+  // 🎯 FIXED ICE SERVERS - LATEST CREDENTIALS
   final Map<String, dynamic> _iceServers = {
     'iceServers': [
       {
@@ -51,23 +54,23 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       },
       {
         'urls': "turn:global.relay.metered.ca:80",
-        'username': "a045f7d7a6e0379a4bf877db",
-        'credential': "hbEIDrc9c46QH8Ol",
+        'username': "4070f1bf82d660ca2d69748a",
+        'credential': "Wc06JryI0N55UNjM",
       },
       {
         'urls': "turn:global.relay.metered.ca:80?transport=tcp",
-        'username': "a045f7d7a6e0379a4bf877db",
-        'credential': "hbEIDrc9c46QH8Ol",
+        'username': "4070f1bf82d660ca2d69748a",
+        'credential': "Wc06JryI0N55UNjM",
       },
       {
         'urls': "turn:global.relay.metered.ca:443",
-        'username': "a045f7d7a6e0379a4bf877db",
-        'credential': "hbEIDrc9c46QH8Ol",
+        'username': "4070f1bf82d660ca2d69748a",
+        'credential': "Wc06JryI0N55UNjM",
       },
       {
         'urls': "turns:global.relay.metered.ca:443?transport=tcp",
-        'username': "a045f7d7a6e0379a4bf877db",
-        'credential': "hbEIDrc9c46QH8Ol",
+        'username': "4070f1bf82d660ca2d69748a",
+        'credential': "Wc06JryI0N55UNjM",
       },
     ],
     'sdpSemantics': 'unified-plan',
@@ -81,10 +84,131 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
   bool get isMeetingActive => _isMeetingActive;
   bool get isAudioEnabled => _isAudioEnabled;
   bool get isVideoEnabled => _isVideoEnabled;
+  bool get isInitialized => _isInitialized;
   List<MeshParticipant> get participants => List.unmodifiable(_participants);
   RTCVideoRenderer? get localRenderer => _localRenderer;
 
-  // 🎯 SET SPEECH SERVICE - KEY INTEGRATION METHOD
+  // 🚀 PROPER INITIALIZATION - MUST BE CALLED FIRST
+  Future<void> initialize() async {
+    if (_isInitialized || _isInitializing) {
+      if (kDebugMode) {
+        print('⚠️ WebRTC service already initialized or initializing');
+      }
+      return;
+    }
+
+    _isInitializing = true;
+
+    try {
+      if (kDebugMode) {
+        print('🔧 Initializing WebRTC Mesh Service...');
+      }
+
+      // Generate unique user ID
+      _userId ??= 'USR${const Uuid().v4().replaceAll('-', '').substring(0, 8)}';
+
+      // ✅ IMMEDIATELY SETUP MEDIA STREAM ON INITIALIZATION
+      await _initializeMediaStream();
+
+      _isInitialized = true;
+      _isInitializing = false;
+
+      if (kDebugMode) {
+        print('✅ WebRTC Service initialized successfully');
+        print('   User ID: $_userId');
+        print('   Audio enabled: $_isAudioEnabled');
+        print('   Video enabled: $_isVideoEnabled');
+      }
+
+      notifyListeners();
+    } catch (e) {
+      _isInitializing = false;
+      if (kDebugMode) {
+        print('❌ Error initializing WebRTC service: $e');
+      }
+      throw Exception('Failed to initialize WebRTC service: $e');
+    }
+  }
+
+  // 🎬 INITIALIZE MEDIA STREAM IMMEDIATELY
+  Future<void> _initializeMediaStream() async {
+    try {
+      if (kDebugMode) {
+        print('🎬 Initializing media stream with audio+video enabled...');
+      }
+
+      // Initialize local renderer first
+      if (_localRenderer == null) {
+        _localRenderer = RTCVideoRenderer();
+        await _localRenderer!.initialize();
+        if (kDebugMode) {
+          print('✅ Local renderer initialized');
+        }
+      }
+
+      // Get media stream with BOTH audio and video enabled by default
+      final mediaConstraints = {
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+          'googEchoCancellation': true,
+          'googAutoGainControl': true,
+          'googNoiseSuppression': true,
+        },
+        'video': {
+          'facingMode': 'user',
+          'width': {'ideal': 640, 'max': 1280, 'min': 320},
+          'height': {'ideal': 480, 'max': 720, 'min': 240},
+          'frameRate': {'ideal': 30, 'max': 30, 'min': 15},
+        },
+      };
+
+      _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+
+      // ✅ FORCE ENABLE BOTH AUDIO AND VIDEO
+      final audioTracks = _localStream!.getAudioTracks();
+      final videoTracks = _localStream!.getVideoTracks();
+
+      for (var track in audioTracks) {
+        track.enabled = true; // ✅ FORCE ENABLE
+      }
+
+      for (var track in videoTracks) {
+        track.enabled = true; // ✅ FORCE ENABLE
+      }
+
+      _isAudioEnabled = audioTracks.isNotEmpty;
+      _isVideoEnabled = videoTracks.isNotEmpty;
+
+      // Connect to renderer
+      await Future.delayed(const Duration(milliseconds: 100));
+      _localRenderer!.srcObject = _localStream;
+
+      // Connect to speech service if available
+      if (_speechService != null) {
+        _speechService!.setWebRTCStream(_localStream);
+        if (kDebugMode) {
+          print('🔗 Media stream connected to Speech service');
+        }
+      }
+
+      if (kDebugMode) {
+        print('📊 Media stream initialized:');
+        print('   📹 Video tracks: ${videoTracks.length} (enabled: $_isVideoEnabled)');
+        print('   🎤 Audio tracks: ${audioTracks.length} (enabled: $_isAudioEnabled)');
+        print('   🎯 Both audio and video ENABLED by default');
+      }
+
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error initializing media stream: $e');
+      }
+      throw Exception('Could not initialize media stream: $e');
+    }
+  }
+
+  // 🎯 SET SPEECH SERVICE
   void setSpeechService(MultilingualSpeechService speechService) {
     _speechService = speechService;
 
@@ -98,81 +222,38 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     }
   }
 
-  // Initialize service
-  Future<void> initialize() async {
-    try {
-      _userId ??= 'USR${const Uuid().v4().replaceAll('-', '').substring(0, 8)}';
-      print('🔧 WebRTC Mesh Service initialized with userId: $_userId');
-      notifyListeners();
-    } catch (e) {
-      print('❌ Error initializing service: $e');
-      throw Exception('Failed to initialize service: $e');
-    }
-  }
-
-  // Debug media stream method
-  Future<void> debugMediaStream() async {
-    print('=== 🔍 MEDIA STREAM DEBUG ===');
-
-    if (_localStream != null) {
-      print('✅ Local stream exists');
-      print('📹 Video tracks: ${_localStream!.getVideoTracks().length}');
-      print('🎤 Audio tracks: ${_localStream!.getAudioTracks().length}');
-
-      for (var track in _localStream!.getVideoTracks()) {
-        print('📹 Video track: ${track.id}, enabled: ${track.enabled}');
-      }
-
-      for (var track in _localStream!.getAudioTracks()) {
-        print('🎤 Audio track: ${track.id}, enabled: ${track.enabled}');
-      }
-    } else {
-      print('❌ Local stream is null');
-    }
-
-    if (_localRenderer != null) {
-      print('✅ Local renderer exists');
-      print('🔗 Renderer srcObject: ${_localRenderer!.srcObject != null ? "Connected" : "Not connected"}');
-    } else {
-      print('❌ Local renderer is null');
-    }
-
-    print('🌐 Remote streams count: ${_remoteStreams.length}');
-    _remoteStreams.forEach((peerId, stream) {
-      print('🔗 Remote stream $peerId: Video=${stream.getVideoTracks().length}, Audio=${stream.getAudioTracks().length}');
-    });
-
-    print('🤝 Peer connections count: ${_peerConnections.length}');
-    _peerConnections.forEach((peerId, pc) {
-      print('🤝 Peer $peerId connection state: ${pc.connectionState}');
-      print('🧊 Peer $peerId ICE state: ${pc.iceConnectionState}');
-      print('🔄 Peer $peerId signaling state: ${pc.signalingState}');
-    });
-
-    print('=== 🔍 DEBUG END ===');
-  }
-
-  // Set user details
+  // 👤 SET USER DETAILS
   void setUserDetails({required String displayName, String? userId}) {
     _displayName = displayName;
     if (userId != null) _userId = userId;
-    print('👤 User details set: $_displayName (ID: $_userId)');
+
+    if (kDebugMode) {
+      print('👤 User details set: $_displayName (ID: $_userId)');
+    }
     notifyListeners();
   }
 
-  // Create a new meeting
+  // 🏗️ CREATE MEETING
   Future<String> createMeeting({required String topic}) async {
     try {
-      final String meetingId = 'GCM${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
-      _meetingId = meetingId;
-      _isHost = true;
-
-      print('🏗️ Creating mesh meeting: $meetingId');
+      // ✅ ENSURE INITIALIZATION FIRST
+      if (!_isInitialized) {
+        await initialize();
+      }
 
       if (topic.trim().isEmpty) {
         throw Exception('Meeting topic cannot be empty');
       }
 
+      final String meetingId = 'GCM${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
+      _meetingId = meetingId;
+      _isHost = true;
+
+      if (kDebugMode) {
+        print('🏗️ Creating meeting: $meetingId');
+      }
+
+      // Create meeting document
       await _firestore.collection('meetings').doc(meetingId).set({
         'meetingId': meetingId,
         'topic': topic,
@@ -180,35 +261,48 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         'status': 'active',
         'createdAt': FieldValue.serverTimestamp(),
         'participantCount': 0,
-        'password': '123',
-        'translationLanguages': {
-          '0': 'english',
-          '1': 'vietnamese',
-        },
         'topology': 'mesh',
         'maxParticipants': 6,
+        'translationLanguages': {
+          'primary': 'vi',
+          'supported': ['en', 'vi', 'zh', 'ja', 'ko'],
+        },
       });
 
-      await _setupLocalStream();
+      // Join mesh network (stream already ready)
       await _joinMeshNetwork(meetingId);
+
+      if (kDebugMode) {
+        print('✅ Meeting created successfully: $meetingId');
+      }
 
       return meetingId;
     } catch (e) {
-      print('❌ Error creating mesh meeting: $e');
+      if (kDebugMode) {
+        print('❌ Error creating meeting: $e');
+      }
       throw Exception('Failed to create meeting: $e');
     }
   }
 
-  // Join an existing meeting
+  // 🚪 JOIN MEETING
   Future<void> joinMeeting({required String meetingId}) async {
     try {
-      print('🚪 Joining mesh meeting: $meetingId');
+      // ✅ ENSURE INITIALIZATION FIRST
+      if (!_isInitialized) {
+        await initialize();
+      }
 
       final cleanMeetingId = meetingId.trim().toUpperCase();
       if (cleanMeetingId.isEmpty) {
         throw Exception('Meeting ID cannot be empty');
       }
 
+      if (kDebugMode) {
+        print('🚪 Joining meeting: $cleanMeetingId');
+      }
+
+      // Check if meeting exists
       final meetingDoc = await _firestore.collection('meetings').doc(cleanMeetingId).get();
       if (!meetingDoc.exists) {
         throw Exception('Meeting not found');
@@ -221,149 +315,62 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       final participantCount = meetingData['participantCount'] ?? 0;
       if (participantCount >= 6) {
-        throw Exception('Meeting is full (max 6 participants for mesh topology)');
+        throw Exception('Meeting is full (max 6 participants)');
       }
 
       _meetingId = cleanMeetingId;
       _isHost = meetingData['hostId'] == _userId;
 
-      await _setupLocalStream();
+      // Join mesh network (stream already ready)
       await _joinMeshNetwork(cleanMeetingId);
+
+      if (kDebugMode) {
+        print('✅ Joined meeting successfully: $cleanMeetingId');
+      }
     } catch (e) {
-      print('❌ Error joining mesh meeting: $e');
+      if (kDebugMode) {
+        print('❌ Error joining meeting: $e');
+      }
       throw Exception('Failed to join meeting: $e');
     }
   }
 
-  // 🎯 ENHANCED LOCAL STREAM SETUP WITH SPEECH SERVICE INTEGRATION
-  Future<void> _setupLocalStream() async {
-    try {
-      print('🎬 Setting up local stream...');
-
-      if (_localRenderer == null) {
-        _localRenderer = RTCVideoRenderer();
-        await _localRenderer!.initialize();
-        print('✅ Local renderer initialized');
-      }
-
-      MediaStream? stream;
-
-      // Try to get user media with multiple fallback strategies
-      try {
-        final mediaConstraints = {
-          'audio': {
-            'echoCancellation': true,
-            'noiseSuppression': true,
-            'autoGainControl': true,
-            'googEchoCancellation': true,
-            'googAutoGainControl': true,
-            'googNoiseSuppression': true,
-            'googHighpassFilter': true,
-            'googTypingNoiseDetection': true,
-          },
-          'video': {
-            'facingMode': 'user',
-            'width': {'ideal': 640, 'max': 1280, 'min': 320},
-            'height': {'ideal': 480, 'max': 720, 'min': 240},
-            'frameRate': {'ideal': 30, 'max': 30, 'min': 15},
-          },
-        };
-
-        stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-        print('✅ Full media stream obtained');
-      } catch (e) {
-        print('⚠️ Full media failed: $e');
-
-        // Fallback: Audio only
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            'audio': {
-              'echoCancellation': true,
-              'noiseSuppression': true,
-              'autoGainControl': true,
-            },
-            'video': false,
-          });
-          print('✅ Audio-only stream obtained');
-          _isVideoEnabled = false;
-        } catch (e2) {
-          print('⚠️ Audio-only failed: $e2');
-
-          // Fallback: Video only
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              'audio': false,
-              'video': {
-                'facingMode': 'user',
-                'width': {'ideal': 320},
-                'height': {'ideal': 240},
-              },
-            });
-            print('✅ Video-only stream obtained');
-            _isAudioEnabled = false;
-          } catch (e3) {
-            print('❌ All media access failed: $e3');
-            throw Exception('Could not access any media devices. Please check permissions.');
-          }
-        }
-      }
-
-      if (stream != null) {
-        _localStream = stream;
-
-        // 🎯 CONNECT STREAM TO SPEECH SERVICE - THE KEY INTEGRATION!
-        if (_speechService != null) {
-          _speechService!.setWebRTCStream(stream);
-          print('🔗 Local stream connected to Speech service');
-        }
-
-        // Ensure renderer is properly connected
-        await Future.delayed(const Duration(milliseconds: 100));
-        _localRenderer!.srcObject = stream;
-
-        _isAudioEnabled = stream.getAudioTracks().isNotEmpty &&
-            stream.getAudioTracks().first.enabled;
-        _isVideoEnabled = stream.getVideoTracks().isNotEmpty &&
-            stream.getVideoTracks().first.enabled;
-
-        print('📊 Stream setup complete:');
-        print('   📹 Video tracks: ${stream.getVideoTracks().length} (enabled: $_isVideoEnabled)');
-        print('   🎤 Audio tracks: ${stream.getAudioTracks().length} (enabled: $_isAudioEnabled)');
-        print('   🎯 Speech service integration: ${_speechService != null ? "Connected" : "Not connected"}');
-
-        notifyListeners();
-      } else {
-        throw Exception('Failed to obtain media stream');
-      }
-
-    } catch (e) {
-      print('💥 Fatal error in _setupLocalStream: $e');
-      throw Exception('Could not setup media stream: $e');
-    }
-  }
-
-  // Join the mesh network
+  // 🕸️ JOIN MESH NETWORK
   Future<void> _joinMeshNetwork(String meetingId) async {
     try {
-      print('🕸️ Joining mesh network for meeting: $meetingId');
+      if (kDebugMode) {
+        print('🕸️ Joining mesh network for meeting: $meetingId');
+      }
 
       _isMeetingActive = true;
+
+      // Add self as participant
       await _addSelfAsParticipant();
+
+      // Start listeners
       _listenForMeshParticipants();
       _listenForSignalingMessages();
 
+      if (kDebugMode) {
+        print('✅ Successfully joined mesh network');
+      }
+
       notifyListeners();
     } catch (e) {
-      print('❌ Error joining mesh network: $e');
+      if (kDebugMode) {
+        print('❌ Error joining mesh network: $e');
+      }
       _isMeetingActive = false;
       notifyListeners();
-      throw Exception('Failed to setup meeting: $e');
+      throw Exception('Failed to join mesh network: $e');
     }
   }
 
-  // Add self as participant
+  // 👥 ADD SELF AS PARTICIPANT
   Future<void> _addSelfAsParticipant() async {
-    if (_meetingId == null || _userId == null) return;
+    if (_meetingId == null || _userId == null) {
+      throw Exception('Meeting ID or User ID is null');
+    }
 
     try {
       await _firestore
@@ -377,28 +384,35 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         'isHost': _isHost,
         'joinedAt': FieldValue.serverTimestamp(),
         'isActive': true,
-        'isAudioEnabled': _isAudioEnabled,
-        'isVideoEnabled': _isVideoEnabled,
+        'isAudioEnabled': _isAudioEnabled, // ✅ TRUE BY DEFAULT
+        'isVideoEnabled': _isVideoEnabled, // ✅ TRUE BY DEFAULT
         'connectionType': 'mesh',
-        'peerConnections': [],
+        'lastSeen': FieldValue.serverTimestamp(),
       });
 
+      // Update participant count
       await _firestore.collection('meetings').doc(_meetingId).update({
         'participantCount': FieldValue.increment(1),
       });
 
-      print('✅ Added self as participant');
+      if (kDebugMode) {
+        print('✅ Added self as participant: $_displayName (Audio: $_isAudioEnabled, Video: $_isVideoEnabled)');
+      }
     } catch (e) {
-      print('❌ Error adding self as participant: $e');
-      rethrow;
+      if (kDebugMode) {
+        print('❌ Error adding self as participant: $e');
+      }
+      throw Exception('Failed to add participant: $e');
     }
   }
 
-  // Listen for participants with better error handling
+  // 👂 LISTEN FOR PARTICIPANTS
   void _listenForMeshParticipants() {
     if (_meetingId == null) return;
 
-    print('👂 Listening for mesh participants...');
+    if (kDebugMode) {
+      print('👂 Listening for mesh participants...');
+    }
 
     final subscription = _firestore
         .collection('meetings')
@@ -406,81 +420,100 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         .collection('participants')
         .where('isActive', isEqualTo: true)
         .snapshots()
-        .listen((snapshot) async {
+        .listen(
+          (snapshot) async {
+        final List<MeshParticipant> newParticipants = [];
+        final Set<String> currentParticipantIds = <String>{};
 
-      final List<MeshParticipant> newParticipants = [];
-      final Set<String> currentParticipantIds = <String>{};
+        for (var doc in snapshot.docs) {
+          final data = doc.data();
+          final participantId = doc.id;
+          currentParticipantIds.add(participantId);
 
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final participantId = doc.id;
-        currentParticipantIds.add(participantId);
+          final participant = MeshParticipant(
+            id: participantId,
+            name: participantId == _userId ? '${data['displayName']} (You)' : data['displayName'],
+            isHost: data['isHost'] ?? false,
+            isAudioEnabled: data['isAudioEnabled'] ?? true,
+            isVideoEnabled: data['isVideoEnabled'] ?? true,
+            isLocal: participantId == _userId,
+          );
 
-        final participant = MeshParticipant(
-          id: participantId,
-          name: participantId == _userId ? '${data['displayName']} (You)' : data['displayName'],
-          isHost: data['isHost'] ?? false,
-          isAudioEnabled: data['isAudioEnabled'] ?? true,
-          isVideoEnabled: data['isVideoEnabled'] ?? true,
-          isLocal: participantId == _userId,
-        );
+          newParticipants.add(participant);
 
-        newParticipants.add(participant);
-
-        // Create peer connection for remote participants
-        if (participantId != _userId && !_peerConnections.containsKey(participantId)) {
-          await _coordinatedCreateConnection(participantId);
+          // Create peer connection for remote participants
+          if (participantId != _userId && !_peerConnections.containsKey(participantId)) {
+            await _coordinatedCreateConnection(participantId);
+          }
         }
-      }
 
-      // Remove disconnected participants
-      final disconnectedIds = _peerConnections.keys.toSet().difference(currentParticipantIds);
-      for (var id in disconnectedIds) {
-        await _removeMeshConnection(id);
-      }
+        // Remove disconnected participants
+        final disconnectedIds = _peerConnections.keys.toSet().difference(currentParticipantIds);
+        for (var id in disconnectedIds) {
+          await _removeMeshConnection(id);
+        }
 
-      _participants.clear();
-      _participants.addAll(newParticipants);
+        _participants.clear();
+        _participants.addAll(newParticipants);
 
-      print('👥 Updated participants: ${_participants.length}');
-      notifyListeners();
-    }, onError: (error) {
-      print('❌ Error listening for mesh participants: $error');
-    });
+        if (kDebugMode) {
+          print('👥 Updated participants: ${_participants.length}');
+        }
+
+        notifyListeners();
+      },
+      onError: (error) {
+        if (kDebugMode) {
+          print('❌ Error listening for participants: $error');
+        }
+      },
+    );
 
     _subscriptions.add(subscription);
   }
 
-  // Better coordination for connection creation
+  // 🤝 COORDINATED CONNECTION CREATION
   Future<void> _coordinatedCreateConnection(String peerId) async {
     if (_negotiationStates.containsKey(peerId) && _negotiationStates[peerId] == true) {
-      print('⚠️ Already creating connection with $peerId');
+      if (kDebugMode) {
+        print('⚠️ Already creating connection with $peerId');
+      }
       return;
     }
 
     final shouldInitiate = (_userId?.compareTo(peerId) ?? 0) > 0;
-    print('🤝 Coordinated connection with $peerId - shouldInitiate: $shouldInitiate');
+
+    if (kDebugMode) {
+      print('🤝 Coordinated connection with $peerId - shouldInitiate: $shouldInitiate');
+    }
 
     _negotiationStates[peerId] = true;
 
     try {
       await _createMeshConnection(peerId, isInitiator: shouldInitiate);
     } catch (e) {
-      print('❌ Error in coordinated connection creation: $e');
+      if (kDebugMode) {
+        print('❌ Error in coordinated connection creation: $e');
+      }
       _negotiationStates[peerId] = false;
     }
   }
 
-  // Enhanced mesh connection creation
+  // 🌐 CREATE MESH CONNECTION
   Future<void> _createMeshConnection(String peerId, {required bool isInitiator}) async {
     try {
-      print("🤝 Creating mesh connection with peer: $peerId (initiator: $isInitiator)");
+      if (kDebugMode) {
+        print('🌐 Creating mesh connection with $peerId (initiator: $isInitiator)');
+      }
 
       if (_peerConnections.containsKey(peerId)) {
-        print('⚠️ Connection with $peerId already exists');
+        if (kDebugMode) {
+          print('⚠️ Connection with $peerId already exists');
+        }
         return;
       }
 
+      // Create peer connection
       final pc = await createPeerConnection({
         ..._iceServers,
         'bundlePolicy': 'max-bundle',
@@ -489,72 +522,95 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       _peerConnections[peerId] = pc;
 
+      // Initialize remote renderer
       final renderer = RTCVideoRenderer();
       await renderer.initialize();
       _remoteRenderers[peerId] = renderer;
 
+      // Add local stream tracks (already available)
       if (_localStream != null) {
-        print('➕ Adding local stream tracks to peer connection...');
+        if (kDebugMode) {
+          print('➕ Adding local stream tracks to peer connection...');
+        }
 
         for (var track in _localStream!.getTracks()) {
           try {
             await pc.addTrack(track, _localStream!);
-            print('✅ Added ${track.kind} track ${track.id} to peer connection with $peerId');
+            if (kDebugMode) {
+              print('✅ Added ${track.kind} track to $peerId');
+            }
           } catch (e) {
-            print('⚠️ Error adding track ${track.id}: $e');
+            if (kDebugMode) {
+              print('⚠️ Error adding track to $peerId: $e');
+            }
           }
         }
       }
 
+      // Setup event handlers
       _setupPeerConnectionEventHandlers(pc, peerId);
 
+      // Create offer if initiator
       if (isInitiator) {
-        await Future.delayed(const Duration(milliseconds: 300));
+        await Future.delayed(const Duration(milliseconds: 500));
         await _createAndSendOffer(pc, peerId);
       } else {
-        print('📱 Waiting for offer from $peerId...');
+        if (kDebugMode) {
+          print('📱 Waiting for offer from $peerId...');
+        }
       }
 
     } catch (e) {
-      print('❌ Error creating mesh connection with $peerId: $e');
+      if (kDebugMode) {
+        print('❌ Error creating mesh connection with $peerId: $e');
+      }
       await _removeMeshConnection(peerId);
       _negotiationStates[peerId] = false;
     }
   }
 
-  // Enhanced event handlers
+  // 🔧 SETUP PEER CONNECTION EVENT HANDLERS
   void _setupPeerConnectionEventHandlers(RTCPeerConnection pc, String peerId) {
     pc.onIceConnectionState = (state) {
-      print('🧊 ICE connection state with $peerId: $state');
+      if (kDebugMode) {
+        print('🧊 ICE connection state with $peerId: $state');
+      }
 
       switch (state) {
         case RTCIceConnectionState.RTCIceConnectionStateFailed:
         case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
-          print('💥 Connection with $peerId failed or disconnected');
+          if (kDebugMode) {
+            print('💥 Connection with $peerId failed or disconnected');
+          }
           _handleConnectionFailure(peerId);
           break;
         case RTCIceConnectionState.RTCIceConnectionStateConnected:
         case RTCIceConnectionState.RTCIceConnectionStateCompleted:
-          print('✅ Successfully connected to $peerId');
+          if (kDebugMode) {
+            print('✅ Successfully connected to $peerId');
+          }
           _connectionRetryCount[peerId] = 0;
           break;
         default:
-          print('🔄 ICE state: $state');
+          break;
       }
     };
 
     pc.onIceCandidate = (candidate) async {
       if (candidate.candidate != null && candidate.candidate!.isNotEmpty) {
         await _sendIceCandidate(peerId, candidate);
-        print('🧊 ICE candidate sent to $peerId: ${candidate.candidate!.substring(0, 50)}...');
+        if (kDebugMode) {
+          print('🧊 ICE candidate sent to $peerId');
+        }
       }
     };
 
     pc.onTrack = (event) {
-      print('📺 onTrack event received from $peerId');
-      print('   Streams count: ${event.streams.length}');
-      print('   Track kind: ${event.track.kind}');
-      print('   Track id: ${event.track.id}');
+      if (kDebugMode) {
+        print('📺 onTrack event received from $peerId');
+        print('   Streams: ${event.streams.length}');
+        print('   Track: ${event.track.kind} - ${event.track.id}');
+      }
 
       if (event.streams.isNotEmpty) {
         final stream = event.streams[0];
@@ -564,51 +620,35 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         if (renderer != null) {
           Future.delayed(const Duration(milliseconds: 100), () {
             renderer.srcObject = stream;
-            print('📺 Remote stream connected to renderer for $peerId');
+            if (kDebugMode) {
+              print('📺 Remote stream connected to renderer for $peerId');
+            }
             notifyListeners();
           });
         }
-
-        print('📺 Remote stream received from $peerId');
-        print('   📹 Remote video tracks: ${stream.getVideoTracks().length}');
-        print('   🎤 Remote audio tracks: ${stream.getAudioTracks().length}');
-
-        for (var track in stream.getTracks()) {
-          print('   Track: ${track.kind} - ${track.id} - enabled: ${track.enabled}');
-        }
-
-        notifyListeners();
       }
     };
 
     pc.onConnectionState = (state) {
-      print('🔗 Connection state with $peerId: $state');
-      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-        print('✅ WebRTC connection established with $peerId');
-      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
-        print('❌ WebRTC connection failed with $peerId');
-        _handleConnectionFailure(peerId);
+      if (kDebugMode) {
+        print('🔗 Connection state with $peerId: $state');
       }
-    };
-
-    pc.onSignalingState = (state) {
-      print('📡 Signaling state with $peerId: $state');
-    };
-
-    pc.onDataChannel = (channel) {
-      print('📡 Data channel received from $peerId: ${channel.label}');
     };
   }
 
-  // Enhanced offer creation
+  // 📤 CREATE AND SEND OFFER
   Future<void> _createAndSendOffer(RTCPeerConnection pc, String peerId) async {
     try {
       if (_negotiationStates[peerId] != true) {
-        print('⚠️ Not in negotiation state with $peerId, skipping offer');
+        if (kDebugMode) {
+          print('⚠️ Not in negotiation state with $peerId, skipping offer');
+        }
         return;
       }
 
-      print('📤 Creating offer for $peerId...');
+      if (kDebugMode) {
+        print('📤 Creating offer for $peerId...');
+      }
 
       final offer = await pc.createOffer({
         'offerToReceiveVideo': 1,
@@ -617,7 +657,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       });
 
       await pc.setLocalDescription(offer);
-      print('✅ Local description set for $peerId');
 
       await _sendSignalingMessage(peerId, {
         'type': 'offer',
@@ -626,18 +665,24 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         'to': peerId,
       });
 
-      print('📤 Offer sent to $peerId');
+      if (kDebugMode) {
+        print('📤 Offer sent to $peerId');
+      }
     } catch (e) {
-      print('❌ Error creating/sending offer to $peerId: $e');
+      if (kDebugMode) {
+        print('❌ Error creating/sending offer to $peerId: $e');
+      }
       _negotiationStates[peerId] = false;
     }
   }
 
-  // Listen for signaling messages
+  // 👂 LISTEN FOR SIGNALING MESSAGES
   void _listenForSignalingMessages() {
     if (_meetingId == null || _userId == null) return;
 
-    print('👂 Listening for signaling messages...');
+    if (kDebugMode) {
+      print('👂 Listening for signaling messages...');
+    }
 
     final subscription = _firestore
         .collection('meetings')
@@ -645,34 +690,42 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         .collection('signaling')
         .where('to', isEqualTo: _userId)
         .snapshots()
-        .listen((snapshot) async {
-
-      for (var change in snapshot.docChanges) {
-        if (change.type == DocumentChangeType.added) {
-          final data = change.doc.data();
-          if (data != null) {
-            await _handleSignalingMessage(data);
-            try {
-              await change.doc.reference.delete();
-            } catch (e) {
-              print('⚠️ Could not delete signaling message: $e');
+        .listen(
+          (snapshot) async {
+        for (var change in snapshot.docChanges) {
+          if (change.type == DocumentChangeType.added) {
+            final data = change.doc.data();
+            if (data != null) {
+              await _handleSignalingMessage(data);
+              try {
+                await change.doc.reference.delete();
+              } catch (e) {
+                if (kDebugMode) {
+                  print('⚠️ Could not delete signaling message: $e');
+                }
+              }
             }
           }
         }
-      }
-    }, onError: (error) {
-      print('❌ Error listening for signaling messages: $error');
-    });
+      },
+      onError: (error) {
+        if (kDebugMode) {
+          print('❌ Error listening for signaling messages: $error');
+        }
+      },
+    );
 
     _subscriptions.add(subscription);
   }
 
-  // Handle signaling message
+  // 📨 HANDLE SIGNALING MESSAGE
   Future<void> _handleSignalingMessage(Map<String, dynamic> message) async {
     final String type = message['type'];
     final String fromId = message['from'];
 
-    print('📨 Received signaling message: $type from $fromId');
+    if (kDebugMode) {
+      print('📨 Received signaling message: $type from $fromId');
+    }
 
     try {
       switch (type) {
@@ -687,14 +740,18 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
           break;
       }
     } catch (e) {
-      print('❌ Error handling signaling message: $e');
+      if (kDebugMode) {
+        print('❌ Error handling signaling message: $e');
+      }
     }
   }
 
-  // Enhanced offer handling
+  // 📨 HANDLE OFFER
   Future<void> _handleOffer(String fromId, Map<String, dynamic> message) async {
     try {
-      print('📨 Handling offer from $fromId');
+      if (kDebugMode) {
+        print('📨 Handling offer from $fromId');
+      }
 
       if (!_peerConnections.containsKey(fromId)) {
         await _createMeshConnection(fromId, isInitiator: false);
@@ -702,15 +759,14 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       final pc = _peerConnections[fromId];
       if (pc == null) {
-        print('❌ No peer connection found for $fromId');
+        if (kDebugMode) {
+          print('❌ No peer connection found for $fromId');
+        }
         return;
       }
 
-      print('📡 Current signaling state with $fromId: ${pc.signalingState}');
-
       final offer = RTCSessionDescription(message['sdp'], message['type']);
       await pc.setRemoteDescription(offer);
-      print('✅ Remote description set for offer from $fromId');
 
       final answer = await pc.createAnswer({
         'offerToReceiveVideo': 1,
@@ -718,7 +774,6 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       });
 
       await pc.setLocalDescription(answer);
-      print('✅ Local description set for answer to $fromId');
 
       await _sendSignalingMessage(fromId, {
         'type': 'answer',
@@ -727,79 +782,92 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         'to': fromId,
       });
 
-      print('📤 Answer sent to $fromId');
+      if (kDebugMode) {
+        print('📤 Answer sent to $fromId');
+      }
       _negotiationStates[fromId] = false;
     } catch (e) {
-      print('❌ Error handling offer from $fromId: $e');
+      if (kDebugMode) {
+        print('❌ Error handling offer from $fromId: $e');
+      }
       _negotiationStates[fromId] = false;
     }
   }
 
-  // Enhanced answer handling
+  // 📨 HANDLE ANSWER
   Future<void> _handleAnswer(String fromId, Map<String, dynamic> message) async {
     try {
-      print('📨 Handling answer from $fromId');
+      if (kDebugMode) {
+        print('📨 Handling answer from $fromId');
+      }
 
       final pc = _peerConnections[fromId];
       if (pc == null) {
-        print('❌ No peer connection found for $fromId');
+        if (kDebugMode) {
+          print('❌ No peer connection found for $fromId');
+        }
         return;
       }
 
-      print('📡 Current signaling state with $fromId: ${pc.signalingState}');
-
       if (pc.signalingState != RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
-        print('⚠️ Cannot handle answer from $fromId, wrong signaling state: ${pc.signalingState}');
+        if (kDebugMode) {
+          print('⚠️ Cannot handle answer from $fromId, wrong signaling state: ${pc.signalingState}');
+        }
         return;
       }
 
       final answer = RTCSessionDescription(message['sdp'], message['type']);
       await pc.setRemoteDescription(answer);
 
-      print('✅ Answer processed from $fromId');
+      if (kDebugMode) {
+        print('✅ Answer processed from $fromId');
+      }
       _negotiationStates[fromId] = false;
     } catch (e) {
-      print('❌ Error handling answer from $fromId: $e');
+      if (kDebugMode) {
+        print('❌ Error handling answer from $fromId: $e');
+      }
       _negotiationStates[fromId] = false;
     }
   }
 
-  // Enhanced ICE candidate handling
+  // 🧊 HANDLE ICE CANDIDATE
   Future<void> _handleIceCandidate(String fromId, Map<String, dynamic> message) async {
     try {
       final pc = _peerConnections[fromId];
       if (pc == null) {
-        print('⚠️ No peer connection found for ICE candidate from $fromId');
+        if (kDebugMode) {
+          print('⚠️ No peer connection found for ICE candidate from $fromId');
+        }
         return;
       }
 
       final signalingState = pc.signalingState;
       if (signalingState == RTCSignalingState.RTCSignalingStateClosed) {
-        print('⚠️ Connection closed, cannot add ICE candidate from $fromId');
+        if (kDebugMode) {
+          print('⚠️ Connection closed, cannot add ICE candidate from $fromId');
+        }
         return;
       }
 
-      if (signalingState == RTCSignalingState.RTCSignalingStateStable ||
-          signalingState == RTCSignalingState.RTCSignalingStateHaveRemoteOffer ||
-          signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+      final candidate = RTCIceCandidate(
+        message['candidate'],
+        message['sdpMid'],
+        message['sdpMLineIndex'],
+      );
 
-        final candidate = RTCIceCandidate(
-          message['candidate'],
-          message['sdpMid'],
-          message['sdpMLineIndex'],
-        );
-
-        await pc.addCandidate(candidate);
+      await pc.addCandidate(candidate);
+      if (kDebugMode) {
         print('🧊 ICE candidate added from $fromId');
-      } else {
-        print('⚠️ Cannot add ICE candidate, signaling state: $signalingState');
       }
     } catch (e) {
-      print('❌ Error handling ICE candidate from $fromId: $e');
+      if (kDebugMode) {
+        print('❌ Error handling ICE candidate from $fromId: $e');
+      }
     }
   }
 
-  // Send signaling message
+  // 📡 SEND SIGNALING MESSAGE
   Future<void> _sendSignalingMessage(String toId, Map<String, dynamic> message) async {
     if (_meetingId == null) return;
 
@@ -813,13 +881,17 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      print('📡 Signaling message sent successfully to $toId');
+      if (kDebugMode) {
+        print('📡 Signaling message sent to $toId');
+      }
     } catch (e) {
-      print('❌ Error sending signaling message: $e');
+      if (kDebugMode) {
+        print('❌ Error sending signaling message: $e');
+      }
     }
   }
 
-  // Send ICE candidate
+  // 🧊 SEND ICE CANDIDATE
   Future<void> _sendIceCandidate(String toId, RTCIceCandidate candidate) async {
     await _sendSignalingMessage(toId, {
       'type': 'ice-candidate',
@@ -831,31 +903,39 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     });
   }
 
-  // Enhanced connection failure handling with retry
+  // 🚨 HANDLE CONNECTION FAILURE
   void _handleConnectionFailure(String peerId) {
-    print('🚨 Handling connection failure with $peerId');
+    if (kDebugMode) {
+      print('🚨 Handling connection failure with $peerId');
+    }
 
     _negotiationStates[peerId] = false;
 
     final retryCount = _connectionRetryCount[peerId] ?? 0;
     if (retryCount < _maxRetryAttempts) {
       _connectionRetryCount[peerId] = retryCount + 1;
-      print('🔄 Retrying connection with $peerId (attempt ${retryCount + 1}/$_maxRetryAttempts)');
+      if (kDebugMode) {
+        print('🔄 Retrying connection with $peerId (attempt ${retryCount + 1}/$_maxRetryAttempts)');
+      }
 
       Future.delayed(Duration(seconds: 2 * (retryCount + 1)), () async {
         await _removeMeshConnection(peerId);
         await _coordinatedCreateConnection(peerId);
       });
     } else {
-      print('❌ Max retry attempts reached for $peerId');
+      if (kDebugMode) {
+        print('❌ Max retry attempts reached for $peerId');
+      }
       _connectionRetryCount.remove(peerId);
     }
   }
 
-  // Enhanced connection removal
+  // 🗑️ REMOVE MESH CONNECTION
   Future<void> _removeMeshConnection(String peerId) async {
     try {
-      print('🗑️ Removing mesh connection with $peerId');
+      if (kDebugMode) {
+        print('🗑️ Removing mesh connection with $peerId');
+      }
 
       _negotiationStates.remove(peerId);
       _connectionRetryCount.remove(peerId);
@@ -865,7 +945,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         try {
           await pc.close();
         } catch (e) {
-          print('⚠️ Error closing peer connection: $e');
+          if (kDebugMode) {
+            print('⚠️ Error closing peer connection: $e');
+          }
         }
         _peerConnections.remove(peerId);
       }
@@ -877,7 +959,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
             await track.stop();
           }
         } catch (e) {
-          print('⚠️ Error stopping remote stream tracks: $e');
+          if (kDebugMode) {
+            print('⚠️ Error stopping remote stream tracks: $e');
+          }
         }
         _remoteStreams.remove(peerId);
       }
@@ -887,50 +971,65 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         try {
           await renderer.dispose();
         } catch (e) {
-          print('⚠️ Error disposing renderer: $e');
+          if (kDebugMode) {
+            print('⚠️ Error disposing renderer: $e');
+          }
         }
         _remoteRenderers.remove(peerId);
       }
 
       notifyListeners();
     } catch (e) {
-      print('❌ Error removing mesh connection: $e');
+      if (kDebugMode) {
+        print('❌ Error removing mesh connection: $e');
+      }
     }
   }
 
-  // 🎯 ENHANCED AUDIO TOGGLE WITH SPEECH SERVICE AWARENESS
+  // 🎤 TOGGLE AUDIO
   Future<void> toggleAudio() async {
     if (_localStream == null) {
-      print('❌ Cannot toggle audio: local stream is null');
+      if (kDebugMode) {
+        print('❌ Cannot toggle audio: local stream is null');
+      }
       return;
     }
 
     try {
       final audioTracks = _localStream!.getAudioTracks();
-      print('🎤 Toggling audio. Current tracks: ${audioTracks.length}');
+      if (kDebugMode) {
+        print('🎤 Toggling audio. Current tracks: ${audioTracks.length}');
+      }
 
       if (audioTracks.isEmpty) {
-        print('⚠️ No audio tracks available');
+        if (kDebugMode) {
+          print('⚠️ No audio tracks available');
+        }
         _isAudioEnabled = false;
       } else {
-        // 🎯 CHECK IF SPEECH SERVICE IS MANAGING AUDIO
+        // Check if speech service is using audio
         bool speechIsManaging = false;
         if (_speechService != null && _speechService!.isListening) {
           speechIsManaging = true;
-          print('⚠️ Speech service is currently using audio - toggle will be applied after speech recognition ends');
+          if (kDebugMode) {
+            print('⚠️ Speech service is currently using audio');
+          }
         }
 
         for (var track in audioTracks) {
           track.enabled = !track.enabled;
-          print('🎵 Audio track ${track.id} enabled: ${track.enabled}');
+          if (kDebugMode) {
+            print('🎵 Audio track ${track.id} enabled: ${track.enabled}');
+          }
         }
         _isAudioEnabled = audioTracks.first.enabled;
 
-        // 🎯 NOTIFY SPEECH SERVICE ABOUT AUDIO STATE CHANGE
+        // Update speech service if not currently managing
         if (_speechService != null && !speechIsManaging) {
-          // Update speech service with new stream state
           _speechService!.setWebRTCStream(_localStream);
-          print('🔗 Updated speech service with new audio state');
+          if (kDebugMode) {
+            print('🔗 Updated speech service with new audio state');
+          }
         }
       }
 
@@ -943,36 +1042,50 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
               .collection('participants')
               .doc(_userId)
               .update({'isAudioEnabled': _isAudioEnabled});
-          print('📡 Updated audio status in Firestore: $_isAudioEnabled');
+          if (kDebugMode) {
+            print('📡 Updated audio status in Firestore: $_isAudioEnabled');
+          }
         } catch (e) {
-          print('⚠️ Error updating audio status in Firestore: $e');
+          if (kDebugMode) {
+            print('⚠️ Error updating audio status: $e');
+          }
         }
       }
 
       notifyListeners();
     } catch (e) {
-      print('❌ Error toggling audio: $e');
+      if (kDebugMode) {
+        print('❌ Error toggling audio: $e');
+      }
     }
   }
 
-  // 🎯 ENHANCED VIDEO TOGGLE WITH SPEECH SERVICE AWARENESS
+  // 🎥 TOGGLE VIDEO
   Future<void> toggleVideo() async {
     if (_localStream == null) {
-      print('❌ Cannot toggle video: local stream is null');
+      if (kDebugMode) {
+        print('❌ Cannot toggle video: local stream is null');
+      }
       return;
     }
 
     try {
       final videoTracks = _localStream!.getVideoTracks();
-      print('🎥 Toggling video. Current tracks: ${videoTracks.length}');
+      if (kDebugMode) {
+        print('🎥 Toggling video. Current tracks: ${videoTracks.length}');
+      }
 
       if (videoTracks.isEmpty) {
-        print('⚠️ No video tracks available');
+        if (kDebugMode) {
+          print('⚠️ No video tracks available');
+        }
         _isVideoEnabled = false;
       } else {
         for (var track in videoTracks) {
           track.enabled = !track.enabled;
-          print('📹 Video track ${track.id} enabled: ${track.enabled}');
+          if (kDebugMode) {
+            print('📹 Video track ${track.id} enabled: ${track.enabled}');
+          }
         }
         _isVideoEnabled = videoTracks.first.enabled;
       }
@@ -986,19 +1099,25 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
               .collection('participants')
               .doc(_userId)
               .update({'isVideoEnabled': _isVideoEnabled});
-          print('📡 Updated video status in Firestore: $_isVideoEnabled');
+          if (kDebugMode) {
+            print('📡 Updated video status in Firestore: $_isVideoEnabled');
+          }
         } catch (e) {
-          print('⚠️ Error updating video status in Firestore: $e');
+          if (kDebugMode) {
+            print('⚠️ Error updating video status: $e');
+          }
         }
       }
 
       notifyListeners();
     } catch (e) {
-      print('❌ Error toggling video: $e');
+      if (kDebugMode) {
+        print('❌ Error toggling video: $e');
+      }
     }
   }
 
-  // Get renderer for participant
+  // 🎬 GET RENDERER FOR PARTICIPANT
   RTCVideoRenderer? getRendererForParticipant(String participantId) {
     if (participantId == _userId) {
       return _localRenderer;
@@ -1006,12 +1125,14 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
     return _remoteRenderers[participantId];
   }
 
-  // Enhanced meeting leave
+  // 🚪 LEAVE MEETING
   Future<void> leaveMeeting() async {
     if (_meetingId == null || _userId == null) return;
 
     try {
-      print('🚪 Leaving mesh meeting...');
+      if (kDebugMode) {
+        print('🚪 Leaving meeting...');
+      }
 
       // Update participant status
       await _firestore
@@ -1029,7 +1150,7 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         'participantCount': FieldValue.increment(-1),
       });
 
-      // If host is leaving, end meeting for all
+      // If host is leaving, end meeting
       if (_isHost) {
         await _firestore.collection('meetings').doc(_meetingId).update({
           'status': 'ended',
@@ -1039,26 +1160,29 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
 
       await _cleanup();
     } catch (e) {
-      print('❌ Error leaving meeting: $e');
+      if (kDebugMode) {
+        print('❌ Error leaving meeting: $e');
+      }
       await _cleanup();
     }
   }
 
-  // 🎯 ENHANCED CLEANUP WITH SPEECH SERVICE INTEGRATION
+  // 🧹 CLEANUP
   Future<void> _cleanup() async {
     try {
-      print('🧹 Cleaning up mesh resources...');
+      if (kDebugMode) {
+        print('🧹 Cleaning up resources...');
+      }
 
-      // 🎯 DISCONNECT SPEECH SERVICE FIRST
+      // Disconnect speech service first
       if (_speechService != null) {
-        // Stop any active speech recognition
         if (_speechService!.isListening) {
           await _speechService!.stopListening();
         }
-
-        // Disconnect from WebRTC stream
         _speechService!.setWebRTCStream(null);
-        print('🔗 Speech service disconnected from WebRTC stream');
+        if (kDebugMode) {
+          print('🔗 Speech service disconnected');
+        }
       }
 
       // Cancel subscriptions
@@ -1066,7 +1190,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         try {
           await subscription.cancel();
         } catch (e) {
-          print('⚠️ Error canceling subscription: $e');
+          if (kDebugMode) {
+            print('⚠️ Error canceling subscription: $e');
+          }
         }
       }
       _subscriptions.clear();
@@ -1076,7 +1202,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         try {
           await pc.close();
         } catch (e) {
-          print('⚠️ Error closing peer connection: $e');
+          if (kDebugMode) {
+            print('⚠️ Error closing peer connection: $e');
+          }
         }
       }
       _peerConnections.clear();
@@ -1092,7 +1220,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
             await track.stop();
           }
         } catch (e) {
-          print('⚠️ Error stopping remote stream: $e');
+          if (kDebugMode) {
+            print('⚠️ Error stopping remote stream: $e');
+          }
         }
       }
       _remoteStreams.clear();
@@ -1102,7 +1232,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         try {
           await renderer.dispose();
         } catch (e) {
-          print('⚠️ Error disposing remote renderer: $e');
+          if (kDebugMode) {
+            print('⚠️ Error disposing remote renderer: $e');
+          }
         }
       }
       _remoteRenderers.clear();
@@ -1114,7 +1246,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
             await track.stop();
           }
         } catch (e) {
-          print('⚠️ Error stopping local stream: $e');
+          if (kDebugMode) {
+            print('⚠️ Error stopping local stream: $e');
+          }
         }
         _localStream = null;
       }
@@ -1124,7 +1258,9 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
         try {
           await _localRenderer!.dispose();
         } catch (e) {
-          print('⚠️ Error disposing local renderer: $e');
+          if (kDebugMode) {
+            print('⚠️ Error disposing local renderer: $e');
+          }
         }
         _localRenderer = null;
       }
@@ -1133,24 +1269,32 @@ class WebRTCMeshMeetingService extends ChangeNotifier {
       _meetingId = null;
       _isHost = false;
       _isMeetingActive = false;
+      _isInitialized = false;
       _participants.clear();
 
+      if (kDebugMode) {
+        print('✅ Resources cleaned up');
+      }
+
       notifyListeners();
-      print('✅ Mesh resources cleaned up');
     } catch (e) {
-      print('❌ Error cleaning up: $e');
+      if (kDebugMode) {
+        print('❌ Error during cleanup: $e');
+      }
     }
   }
 
   @override
   void dispose() {
-    print('🗑️ Disposing WebRTC Mesh Service...');
+    if (kDebugMode) {
+      print('🗑️ Disposing WebRTC Mesh Service...');
+    }
     _cleanup();
     super.dispose();
   }
 }
 
-// Mesh Participant Model
+// 👥 MESH PARTICIPANT MODEL
 class MeshParticipant {
   final String id;
   final String name;
