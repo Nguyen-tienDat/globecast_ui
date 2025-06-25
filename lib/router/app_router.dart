@@ -1,11 +1,11 @@
-// lib/router/app_router.dart - FIXED VERSION
+// lib/router/app_router.dart - UPDATED FOR ENHANCED MEETING
 import 'package:flutter/material.dart';
 import '../screens/auth/welcome_screen.dart';
 import '../screens/auth/signin_screen.dart';
 import '../screens/auth/signup_screen.dart';
+import '../screens/create_meeting/create_meeting_screen.dart';
 import '../screens/home/home_screen.dart';
 import '../screens/join_meeting/join_meeting_screen.dart';
-import '../screens/create_meeting/create_meeting_screen.dart';
 import '../screens/meeting/meeting_screen.dart';
 
 class Routes {
@@ -21,11 +21,15 @@ class Routes {
     welcome: (context) => const WelcomeScreen(),
     signIn: (context) => const SignInScreen(),
     signUp: (context) => const SignUpScreen(),
-    home: (context) => const HomeScreen(),
-    joinMeeting: (context) => const JoinMeetingScreen(),
-    createMeeting: (context) => const CreateMeetingScreen(),
+    home: (context) => const EnhancedHomeScreen(),
 
-    // ✅ Simplified meeting route - no unnecessary Consumer wrapper
+    // 🎯 ENHANCED JOIN MEETING WITH LANGUAGE SETUP
+    joinMeeting: (context) => const EnhancedJoinMeetingScreen(),
+
+    // 🎯 ENHANCED CREATE MEETING WITH LANGUAGE SETUP
+    createMeeting: (context) => const EnhancedCreateMeetingScreen(),
+
+    // Enhanced meeting route
     meeting: (context) {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
@@ -73,7 +77,7 @@ class Routes {
         );
       }
 
-      // ✅ Direct MeetingScreen instantiation - Provider is available from main.dart
+      // Enhanced MeetingScreen with real-time translation
       return MeetingScreen(
         code: code,
         displayName: displayName,

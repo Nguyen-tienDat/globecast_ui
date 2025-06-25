@@ -1,23 +1,23 @@
-// lib/screens/join_meeting/join_meeting_screen.dart - FIXED LAYOUT
+// lib/screens/join_meeting/enhanced_join_meeting_screen.dart
 import 'package:flutter/material.dart';
-import '../../router/app_router.dart';
 import '../../theme/app_theme.dart';
 import '../../models/translation_models.dart';
 import '../meeting/meeting_screen.dart';
 
-class JoinMeetingScreen extends StatefulWidget {
-  const JoinMeetingScreen({super.key});
+class EnhancedJoinMeetingScreen extends StatefulWidget {
+  const EnhancedJoinMeetingScreen({super.key});
 
   @override
-  State<JoinMeetingScreen> createState() => _JoinMeetingScreenState();
+  State<EnhancedJoinMeetingScreen> createState() => _EnhancedJoinMeetingScreenState();
 }
 
-class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
+class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
   final _formKey = GlobalKey<FormState>();
   final _meetingCodeController = TextEditingController();
   final _displayNameController = TextEditingController();
 
-  String _selectedTargetLanguage = 'en'; // Default to English
+  String _selectedSpeakingLanguage = 'vi'; // Language user speaks
+  String _selectedDisplayLanguage = 'vi';  // Language user wants to see
   bool _isJoining = false;
 
   @override
@@ -35,7 +35,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
     });
 
     try {
-      // Navigate to meeting with selected language
+      // Navigate to enhanced meeting screen with language settings
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -43,7 +43,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
             builder: (context) => MeetingScreen(
               code: _meetingCodeController.text.trim().toUpperCase(),
               displayName: _displayNameController.text.trim(),
-              targetLanguage: _selectedTargetLanguage,
+              targetLanguage: _selectedDisplayLanguage, // What user wants to see
               meetingId: '',
             ),
           ),
@@ -77,7 +77,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'Join Meeting',
+          'Join Global Meeting',
           style: TextStyle(color: Colors.white),
         ),
       ),
@@ -89,15 +89,15 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Header with new description
+                // Header
                 const Icon(
-                  Icons.video_call,
+                  Icons.translate,
                   size: 64,
                   color: GcbAppTheme.primary,
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Join a Global Meeting',
+                  'Real-time Translation Meeting',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
@@ -107,7 +107,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Connect with people worldwide and communicate in your language with real-time translation',
+                  'Speak your language, understand everyone else\'s automatically',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey[400],
@@ -117,59 +117,65 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                 const SizedBox(height: 32),
 
                 // Meeting Code Input
-                TextFormField(
-                  controller: _meetingCodeController,
-                  decoration: InputDecoration(
-                    labelText: 'Meeting Code',
-                    hintText: 'Enter meeting code (e.g., GCM12345678)',
-                    prefixIcon: const Icon(Icons.meeting_room),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                _buildInputSection(
+                  title: 'Meeting Code',
+                  child: TextFormField(
+                    controller: _meetingCodeController,
+                    decoration: InputDecoration(
+                      hintText: 'Enter meeting code (e.g., GCM12345678)',
+                      prefixIcon: const Icon(Icons.meeting_room),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: GcbAppTheme.surface,
                     ),
-                    filled: true,
-                    fillColor: GcbAppTheme.surface,
+                    style: const TextStyle(color: Colors.white),
+                    textCapitalization: TextCapitalization.characters,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter a meeting code';
+                      }
+                      if (value.trim().length < 6) {
+                        return 'Meeting code is too short';
+                      }
+                      return null;
+                    },
                   ),
-                  style: const TextStyle(color: Colors.white),
-                  textCapitalization: TextCapitalization.characters,
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter a meeting code';
-                    }
-                    if (value.trim().length < 6) {
-                      return 'Meeting code is too short';
-                    }
-                    return null;
-                  },
                 ),
-                const SizedBox(height: 16),
+
+                const SizedBox(height: 20),
 
                 // Display Name Input
-                TextFormField(
-                  controller: _displayNameController,
-                  decoration: InputDecoration(
-                    labelText: 'Your Name',
-                    hintText: 'Enter your display name',
-                    prefixIcon: const Icon(Icons.person),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                _buildInputSection(
+                  title: 'Your Name',
+                  child: TextFormField(
+                    controller: _displayNameController,
+                    decoration: InputDecoration(
+                      hintText: 'Enter your display name',
+                      prefixIcon: const Icon(Icons.person),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: GcbAppTheme.surface,
                     ),
-                    filled: true,
-                    fillColor: GcbAppTheme.surface,
+                    style: const TextStyle(color: Colors.white),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter your name';
+                      }
+                      if (value.trim().length < 2) {
+                        return 'Name must be at least 2 characters';
+                      }
+                      return null;
+                    },
                   ),
-                  style: const TextStyle(color: Colors.white),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter your name';
-                    }
-                    if (value.trim().length < 2) {
-                      return 'Name must be at least 2 characters';
-                    }
-                    return null;
-                  },
                 ),
-                const SizedBox(height: 24),
 
-                // Enhanced Language Selection Section
+                const SizedBox(height: 32),
+
+                // 🎯 LANGUAGE CONFIGURATION SECTION
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
@@ -192,7 +198,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
-                              Icons.auto_awesome,
+                              Icons.language,
                               color: GcbAppTheme.primary,
                               size: 20,
                             ),
@@ -203,7 +209,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Your Display Language',
+                                  'Language Settings',
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 16,
@@ -211,7 +217,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                                   ),
                                 ),
                                 Text(
-                                  'All conversations will be translated to this language automatically',
+                                  'Configure your speaking and display languages',
                                   style: TextStyle(
                                     color: Colors.grey,
                                     fontSize: 12,
@@ -222,107 +228,72 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
 
-                      // Language Grid
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          childAspectRatio: 3.5,
-                          crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
-                        ),
-                        itemCount: _getPopularLanguages().length,
-                        itemBuilder: (context, index) {
-                          final langCode = _getPopularLanguages()[index];
-                          final isSelected = langCode == _selectedTargetLanguage;
+                      const SizedBox(height: 20),
 
-                          return InkWell(
-                            onTap: () {
-                              setState(() {
-                                _selectedTargetLanguage = langCode;
-                              });
-                            },
-                            borderRadius: BorderRadius.circular(12),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? GcbAppTheme.primary.withOpacity(0.2)
-                                    : Colors.grey[800],
-                                borderRadius: BorderRadius.circular(12),
-                                border: isSelected ? Border.all(
-                                  color: GcbAppTheme.primary,
-                                  width: 2,
-                                ) : null,
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    SupportedLanguages.getLanguageFlag(langCode),
-                                    style: const TextStyle(fontSize: 16),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      SupportedLanguages.getLanguageName(langCode),
-                                      style: TextStyle(
-                                        color: isSelected ? GcbAppTheme.primary : Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
+                      // Speaking Language Selection
+                      _buildLanguageSection(
+                        title: '🎤 I speak',
+                        subtitle: 'Language you will speak in the meeting',
+                        selectedLanguage: _selectedSpeakingLanguage,
+                        onLanguageChanged: (language) {
+                          setState(() {
+                            _selectedSpeakingLanguage = language;
+                          });
                         },
                       ),
 
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 20),
 
-                      // More languages button
-                      InkWell(
-                        onTap: _showAllLanguagesDialog,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: Colors.grey[600]!,
-                              width: 1,
-                            ),
-                            borderRadius: BorderRadius.circular(8),
+                      // Display Language Selection
+                      _buildLanguageSection(
+                        title: '👁️ I want to see everything in',
+                        subtitle: 'All conversations will be translated to this language',
+                        selectedLanguage: _selectedDisplayLanguage,
+                        onLanguageChanged: (language) {
+                          setState(() {
+                            _selectedDisplayLanguage = language;
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Language preview
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Colors.blue.withOpacity(0.3),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.more_horiz,
-                                color: Colors.grey[400],
-                                size: 16,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'More languages',
-                                style: TextStyle(
-                                  color: Colors.grey[400],
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.info_outline,
+                              color: Colors.blue,
+                              size: 16,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'You speak ${SupportedLanguages.getLanguageFlag(_selectedSpeakingLanguage)} ${SupportedLanguages.getLanguageName(_selectedSpeakingLanguage)}, see everything in ${SupportedLanguages.getLanguageFlag(_selectedDisplayLanguage)} ${SupportedLanguages.getLanguageName(_selectedDisplayLanguage)}',
+                                style: const TextStyle(
+                                  color: Colors.blue,
                                   fontSize: 12,
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
 
                 // Join Button
                 ElevatedButton(
@@ -351,7 +322,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                       const Icon(Icons.video_call, size: 20),
                       const SizedBox(width: 8),
                       const Text(
-                        'Join Meeting',
+                        'Join with Translation',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -359,91 +330,58 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        SupportedLanguages.getLanguageFlag(_selectedTargetLanguage),
+                        '${SupportedLanguages.getLanguageFlag(_selectedSpeakingLanguage)} → ${SupportedLanguages.getLanguageFlag(_selectedDisplayLanguage)}',
                         style: const TextStyle(fontSize: 16),
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
                 // Feature highlight
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: GcbAppTheme.primary.withOpacity(0.1),
+                    color: Colors.green.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: GcbAppTheme.primary.withOpacity(0.3),
+                      color: Colors.green.withOpacity(0.3),
                     ),
                   ),
-                  child: Row(
+                  child: Column(
                     children: [
-                      Icon(
-                        Icons.auto_awesome,
-                        color: GcbAppTheme.primary,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Real-time Translation',
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Real-time Translation Features',
                               style: TextStyle(
-                                color: GcbAppTheme.primary,
+                                color: Colors.green,
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            Text(
-                              'Speak your language, understand everyone else\'s language automatically',
-                              style: TextStyle(
-                                color: GcbAppTheme.primary.withOpacity(0.8),
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Info card
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: Colors.orange.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.info_outline,
-                        color: Colors.orange,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Make sure you have camera and microphone permissions enabled. You can change your language settings anytime during the meeting.',
-                          style: TextStyle(
-                            color: Colors.orange[300],
-                            fontSize: 12,
                           ),
-                        ),
+                        ],
                       ),
+                      const SizedBox(height: 8),
+                      _buildFeatureItem('✨ Automatic language detection'),
+                      _buildFeatureItem('🗣️ Live speech-to-text transcription'),
+                      _buildFeatureItem('🌐 Instant translation to your language'),
+                      _buildFeatureItem('👥 See everyone\'s conversation translated'),
+                      _buildFeatureItem('🎯 High accuracy with Google Cloud AI'),
                     ],
                   ),
                 ),
+
+                const SizedBox(height: 40), // Extra padding for scroll
               ],
             ),
           ),
@@ -452,18 +390,176 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
     );
   }
 
-  List<String> _getPopularLanguages() {
-    // Return most popular languages for quick selection
-    return ['en', 'vi', 'zh', 'ja', 'ko', 'es', 'fr', 'de'];
+  Widget _buildInputSection({required String title, required Widget child}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 8),
+        child,
+      ],
+    );
   }
 
-  void _showAllLanguagesDialog() {
+  Widget _buildLanguageSection({
+    required String title,
+    required String subtitle,
+    required String selectedLanguage,
+    required Function(String) onLanguageChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            color: Colors.grey,
+            fontSize: 11,
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Language selection grid
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            childAspectRatio: 4,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemCount: _getPopularLanguages().length,
+          itemBuilder: (context, index) {
+            final langCode = _getPopularLanguages()[index];
+            final isSelected = langCode == selectedLanguage;
+
+            return InkWell(
+              onTap: () => onLanguageChanged(langCode),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? GcbAppTheme.primary.withOpacity(0.2)
+                      : Colors.grey[800],
+                  borderRadius: BorderRadius.circular(10),
+                  border: isSelected ? Border.all(
+                    color: GcbAppTheme.primary,
+                    width: 2,
+                  ) : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      SupportedLanguages.getLanguageFlag(langCode),
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        SupportedLanguages.getLanguageName(langCode),
+                        style: TextStyle(
+                          color: isSelected ? GcbAppTheme.primary : Colors.white,
+                          fontSize: 11,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+
+        const SizedBox(height: 8),
+
+        // More languages button
+        InkWell(
+          onTap: () => _showAllLanguagesDialog(selectedLanguage, onLanguageChanged),
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: Colors.grey[600]!,
+                width: 1,
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.more_horiz,
+                  color: Colors.grey[400],
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'More languages',
+                  style: TextStyle(
+                    color: Colors.grey[400],
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFeatureItem(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: Colors.green[300],
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<String> _getPopularLanguages() {
+    return ['vi', 'en', 'zh', 'ja', 'ko', 'es', 'fr', 'de'];
+  }
+
+  void _showAllLanguagesDialog(String currentSelection, Function(String) onChanged) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: GcbAppTheme.surface,
         title: const Text(
-          'Select Your Language',
+          'Select Language',
           style: TextStyle(color: Colors.white),
         ),
         content: SizedBox(
@@ -473,7 +569,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
             itemCount: SupportedLanguages.getAllLanguageCodes().length,
             itemBuilder: (context, index) {
               final langCode = SupportedLanguages.getAllLanguageCodes()[index];
-              final isSelected = langCode == _selectedTargetLanguage;
+              final isSelected = langCode == currentSelection;
 
               return ListTile(
                 leading: Text(
@@ -487,6 +583,13 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
+                subtitle: Text(
+                  SupportedLanguages.getNativeName(langCode),
+                  style: TextStyle(
+                    color: Colors.grey[400],
+                    fontSize: 12,
+                  ),
+                ),
                 trailing: isSelected
                     ? const Icon(
                   Icons.check_circle,
@@ -494,9 +597,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                 )
                     : null,
                 onTap: () {
-                  setState(() {
-                    _selectedTargetLanguage = langCode;
-                  });
+                  onChanged(langCode);
                   Navigator.of(context).pop();
                 },
               );
