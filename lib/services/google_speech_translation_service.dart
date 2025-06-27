@@ -359,7 +359,7 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
       );
 
       // ✅ REAL-TIME: Setup faster speech processing timer
-      _speechTimer = Timer.periodic(const Duration(milliseconds: 4000), (timer) {
+      _speechTimer = Timer.periodic(const Duration(milliseconds: 10000), (timer) {
         _processSpeechBuffer();
       });
 
@@ -423,7 +423,7 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
       // Configure recognition for real-time
       final config = RecognitionConfig(
         encoding: AudioEncoding.LINEAR16,
-        model: RecognitionModel.latest_short, // ✅ REAL-TIME: Use short model
+        model: RecognitionModel.latest_long, // ✅ REAL-TIME: Use short model
         enableAutomaticPunctuation: true,
         sampleRateHertz: 16000,
         languageCode: _getGoogleLanguageCode(_preferredLanguage),

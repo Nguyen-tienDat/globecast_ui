@@ -1,10 +1,8 @@
-// lib/screens/create_meeting/enhanced_create_meeting_screen.dart
+// lib/screens/create_meeting/enhanced_create_meeting_screen.dart - SIMPLIFIED VERSION
 import 'package:flutter/material.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
-import '../../router/app_router.dart';
 import '../../services/webrtc_mesh_meeting_service.dart';
-import '../../models/translation_models.dart';
 import '../meeting/meeting_screen.dart';
 
 class EnhancedCreateMeetingScreen extends StatefulWidget {
@@ -18,9 +16,22 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
   final _topicController = TextEditingController();
   final _hostNameController = TextEditingController(text: 'Host');
 
-  String _selectedHostLanguage = 'vi'; // Language host speaks
-  String _selectedDisplayLanguage = 'vi'; // Language host wants to see
+  String _selectedLanguage = 'vi'; // User's primary language
   bool _isLoading = false;
+
+  final Map<String, String> _languages = {
+    'vi': '🇻🇳 Tiếng Việt',
+    'en': '🇺🇸 English',
+    'zh': '🇨🇳 Chinese',
+    'ja': '🇯🇵 Japanese',
+    'ko': '🇰🇷 Korean',
+    'th': '🇹🇭 Thai',
+    'es': '🇪🇸 Spanish',
+    'fr': '🇫🇷 French',
+    'de': '🇩🇪 German',
+    'ar': '🇸🇦 Arabic',
+    'hi': '🇮🇳 Hindi',
+  };
 
   @override
   void dispose() {
@@ -58,14 +69,14 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
       final meetingId = await webrtcService.createMeeting(topic: _topicController.text.trim());
 
       if (mounted) {
-        // Navigate to enhanced meeting screen with language settings
+        // Navigate to meeting screen with language setting
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
             builder: (context) => MeetingScreen(
               code: meetingId,
               displayName: '${_hostNameController.text.trim()} (Host)',
-              targetLanguage: _selectedDisplayLanguage,
+              targetLanguage: _selectedLanguage,
               meetingId: meetingId,
             ),
           ),
@@ -98,7 +109,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'Create Global Meeting',
+          'Create Translation Meeting',
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w500,
@@ -122,7 +133,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Start Translation Meeting',
+                      'Real-time Translation Meeting',
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
@@ -132,7 +143,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Create a meeting where everyone speaks their language',
+                      'Create a meeting with instant Google Cloud translation',
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.grey[400],
@@ -191,7 +202,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
 
               const SizedBox(height: 32),
 
-              // 🎯 HOST LANGUAGE CONFIGURATION
+              // 🎯 SIMPLIFIED LANGUAGE SELECTION
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -225,7 +236,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Host Language Settings',
+                                'Your Language',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 16,
@@ -233,7 +244,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                                 ),
                               ),
                               Text(
-                                'Configure your speaking and display languages as host',
+                                'Language you speak & others will see',
                                 style: TextStyle(
                                   color: Colors.grey,
                                   fontSize: 12,
@@ -247,61 +258,47 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
 
                     const SizedBox(height: 20),
 
-                    // Host Speaking Language
-                    _buildLanguageSection(
-                      title: '🎤 I will speak',
-                      subtitle: 'Language you will use to host the meeting',
-                      selectedLanguage: _selectedHostLanguage,
-                      onLanguageChanged: (language) {
-                        setState(() {
-                          _selectedHostLanguage = language;
-                        });
-                      },
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // Host Display Language
-                    _buildLanguageSection(
-                      title: '👁️ I want to see everything in',
-                      subtitle: 'All participants\' conversations will be translated to this',
-                      selectedLanguage: _selectedDisplayLanguage,
-                      onLanguageChanged: (language) {
-                        setState(() {
-                          _selectedDisplayLanguage = language;
-                        });
-                      },
-                    ),
+                    // Language selection
+                    _buildLanguageDropdown(),
 
                     const SizedBox(height: 16),
 
-                    // Preview
+                    // Explanation
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.1),
+                        color: Colors.blue.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: Colors.green.withOpacity(0.3),
+                          color: Colors.blue.withOpacity(0.3),
                         ),
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(
-                            Icons.preview,
-                            color: Colors.green,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'As host: Speak ${SupportedLanguages.getLanguageFlag(_selectedHostLanguage)} ${SupportedLanguages.getLanguageName(_selectedHostLanguage)}, see everything in ${SupportedLanguages.getLanguageFlag(_selectedDisplayLanguage)} ${SupportedLanguages.getLanguageName(_selectedDisplayLanguage)}',
-                              style: const TextStyle(
-                                color: Colors.green,
-                                fontSize: 12,
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.info_outline,
+                                color: Colors.blue,
+                                size: 16,
                               ),
-                            ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'How it works:',
+                                style: TextStyle(
+                                  color: Colors.blue,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
+                          const SizedBox(height: 8),
+                          _buildExplanationItem('🎤 You speak ${_languages[_selectedLanguage]?.split(' ').last}'),
+                          _buildExplanationItem('👥 Others hear real-time translation to ${_languages[_selectedLanguage]?.split(' ').last}'),
+                          _buildExplanationItem('🌐 You see all conversations translated to ${_languages[_selectedLanguage]?.split(' ').last}'),
+                          _buildExplanationItem('⚡ Powered by Google Cloud AI'),
                         ],
                       ),
                     ),
@@ -338,7 +335,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                       const Icon(Icons.video_call, color: Colors.white),
                       const SizedBox(width: 8),
                       const Text(
-                        'Create & Start Meeting',
+                        'Create Meeting',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 16,
@@ -347,7 +344,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '${SupportedLanguages.getLanguageFlag(_selectedHostLanguage)} → ${SupportedLanguages.getLanguageFlag(_selectedDisplayLanguage)}',
+                        _languages[_selectedLanguage]?.split(' ').first ?? '',
                         style: const TextStyle(fontSize: 16),
                       ),
                     ],
@@ -357,31 +354,31 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
 
               const SizedBox(height: 16),
 
-              // Info about participants
+              // Features info
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
+                  color: Colors.green.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.blue.withOpacity(0.3),
+                    color: Colors.green.withOpacity(0.3),
                   ),
                 ),
                 child: Column(
                   children: [
                     Row(
                       children: [
-                        Icon(
-                          Icons.info_outline,
-                          color: Colors.blue,
+                        const Icon(
+                          Icons.check_circle,
+                          color: Colors.green,
                           size: 16,
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
                           child: Text(
-                            'How it works for participants',
+                            'Meeting Features',
                             style: TextStyle(
-                              color: Colors.blue,
+                              color: Colors.green,
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                             ),
@@ -390,15 +387,16 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                       ],
                     ),
                     const SizedBox(height: 8),
-                    _buildInfoItem('🌐 Each participant chooses their own language'),
-                    _buildInfoItem('🗣️ Everyone speaks their native language'),
-                    _buildInfoItem('👂 Everyone sees conversations in their chosen language'),
-                    _buildInfoItem('🤝 Natural communication across all languages'),
+                    _buildFeatureItem('🔥 Real-time speech translation'),
+                    _buildFeatureItem('☁️ Google Cloud Speech-to-Text'),
+                    _buildFeatureItem('👥 Up to 6 participants'),
+                    _buildFeatureItem('🎯 Auto language detection'),
+                    _buildFeatureItem('📱 Works on all devices'),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 40), // Extra padding at bottom for scroll
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -424,128 +422,74 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
     );
   }
 
-  Widget _buildLanguageSection({
-    required String title,
-    required String subtitle,
-    required String selectedLanguage,
-    required Function(String) onLanguageChanged,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: const TextStyle(
-            color: Colors.grey,
-            fontSize: 11,
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Language selection grid
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 4,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-          ),
-          itemCount: _getPopularLanguages().length,
-          itemBuilder: (context, index) {
-            final langCode = _getPopularLanguages()[index];
-            final isSelected = langCode == selectedLanguage;
-
-            return InkWell(
-              onTap: () => onLanguageChanged(langCode),
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? GcbAppTheme.primary.withOpacity(0.2)
-                      : Colors.grey[800],
-                  borderRadius: BorderRadius.circular(10),
-                  border: isSelected ? Border.all(
-                    color: GcbAppTheme.primary,
-                    width: 2,
-                  ) : null,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      SupportedLanguages.getLanguageFlag(langCode),
-                      style: const TextStyle(fontSize: 14),
+  Widget _buildLanguageDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.grey[800],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[700]!),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedLanguage,
+          isExpanded: true,
+          dropdownColor: GcbAppTheme.surface,
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+          items: _languages.entries.map((entry) {
+            return DropdownMenuItem<String>(
+              value: entry.key,
+              child: Row(
+                children: [
+                  Text(
+                    entry.value.split(' ').first, // Flag emoji
+                    style: const TextStyle(fontSize: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      entry.value.substring(entry.value.indexOf(' ') + 1), // Language name
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
                     ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        SupportedLanguages.getLanguageName(langCode),
-                        style: TextStyle(
-                          color: isSelected ? GcbAppTheme.primary : Colors.white,
-                          fontSize: 11,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             );
+          }).toList(),
+          onChanged: (String? newValue) {
+            if (newValue != null) {
+              setState(() {
+                _selectedLanguage = newValue;
+              });
+            }
           },
         ),
-
-        const SizedBox(height: 8),
-
-        // More languages button
-        InkWell(
-          onTap: () => _showAllLanguagesDialog(selectedLanguage, onLanguageChanged),
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: Colors.grey[600]!,
-                width: 1,
-              ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.more_horiz,
-                  color: Colors.grey[400],
-                  size: 16,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'More languages',
-                  style: TextStyle(
-                    color: Colors.grey[400],
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildInfoItem(String text) {
+  Widget _buildExplanationItem(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: Colors.blue[300],
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeatureItem(String text) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
@@ -555,77 +499,9 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
             child: Text(
               text,
               style: TextStyle(
-                color: Colors.blue[300],
+                color: Colors.green[300],
                 fontSize: 12,
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<String> _getPopularLanguages() {
-    return ['vi', 'en', 'zh', 'ja', 'ko', 'es', 'fr', 'de'];
-  }
-
-  void _showAllLanguagesDialog(String currentSelection, Function(String) onChanged) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: GcbAppTheme.surface,
-        title: const Text(
-          'Select Language',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: ListView.builder(
-            itemCount: SupportedLanguages.getAllLanguageCodes().length,
-            itemBuilder: (context, index) {
-              final langCode = SupportedLanguages.getAllLanguageCodes()[index];
-              final isSelected = langCode == currentSelection;
-
-              return ListTile(
-                leading: Text(
-                  SupportedLanguages.getLanguageFlag(langCode),
-                  style: const TextStyle(fontSize: 24),
-                ),
-                title: Text(
-                  SupportedLanguages.getLanguageName(langCode),
-                  style: TextStyle(
-                    color: isSelected ? GcbAppTheme.primary : Colors.white,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  ),
-                ),
-                subtitle: Text(
-                  SupportedLanguages.getNativeName(langCode),
-                  style: TextStyle(
-                    color: Colors.grey[400],
-                    fontSize: 12,
-                  ),
-                ),
-                trailing: isSelected
-                    ? const Icon(
-                  Icons.check_circle,
-                  color: GcbAppTheme.primary,
-                )
-                    : null,
-                onTap: () {
-                  onChanged(langCode);
-                  Navigator.of(context).pop();
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.grey),
             ),
           ),
         ],

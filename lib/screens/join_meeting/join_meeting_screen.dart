@@ -1,7 +1,6 @@
-// lib/screens/join_meeting/enhanced_join_meeting_screen.dart
+// lib/screens/join_meeting/enhanced_join_meeting_screen.dart - SIMPLIFIED VERSION
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
-import '../../models/translation_models.dart';
 import '../meeting/meeting_screen.dart';
 
 class EnhancedJoinMeetingScreen extends StatefulWidget {
@@ -16,9 +15,22 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
   final _meetingCodeController = TextEditingController();
   final _displayNameController = TextEditingController();
 
-  String _selectedSpeakingLanguage = 'vi'; // Language user speaks
-  String _selectedDisplayLanguage = 'vi';  // Language user wants to see
+  String _selectedLanguage = 'vi'; // User's primary language
   bool _isJoining = false;
+
+  final Map<String, String> _languages = {
+    'vi': '🇻🇳 Tiếng Việt',
+    'en': '🇺🇸 English',
+    'zh': '🇨🇳 Chinese',
+    'ja': '🇯🇵 Japanese',
+    'ko': '🇰🇷 Korean',
+    'th': '🇹🇭 Thai',
+    'es': '🇪🇸 Spanish',
+    'fr': '🇫🇷 French',
+    'de': '🇩🇪 German',
+    'ar': '🇸🇦 Arabic',
+    'hi': '🇮🇳 Hindi',
+  };
 
   @override
   void dispose() {
@@ -35,7 +47,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
     });
 
     try {
-      // Navigate to enhanced meeting screen with language settings
+      // Navigate to meeting screen with language setting
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -43,7 +55,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
             builder: (context) => MeetingScreen(
               code: _meetingCodeController.text.trim().toUpperCase(),
               displayName: _displayNameController.text.trim(),
-              targetLanguage: _selectedDisplayLanguage, // What user wants to see
+              targetLanguage: _selectedLanguage,
               meetingId: '',
             ),
           ),
@@ -77,7 +89,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'Join Global Meeting',
+          'Join Translation Meeting',
           style: TextStyle(color: Colors.white),
         ),
       ),
@@ -107,7 +119,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Speak your language, understand everyone else\'s automatically',
+                  'Join a meeting with instant Google Cloud translation',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey[400],
@@ -123,12 +135,15 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                     controller: _meetingCodeController,
                     decoration: InputDecoration(
                       hintText: 'Enter meeting code (e.g., GCM12345678)',
-                      prefixIcon: const Icon(Icons.meeting_room),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      hintStyle: TextStyle(color: Colors.grey[500]),
+                      prefixIcon: const Icon(Icons.meeting_room, color: Colors.grey),
                       filled: true,
                       fillColor: GcbAppTheme.surface,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                     style: const TextStyle(color: Colors.white),
                     textCapitalization: TextCapitalization.characters,
@@ -153,12 +168,15 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                     controller: _displayNameController,
                     decoration: InputDecoration(
                       hintText: 'Enter your display name',
-                      prefixIcon: const Icon(Icons.person),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      hintStyle: TextStyle(color: Colors.grey[500]),
+                      prefixIcon: const Icon(Icons.person, color: Colors.grey),
                       filled: true,
                       fillColor: GcbAppTheme.surface,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                     style: const TextStyle(color: Colors.white),
                     validator: (value) {
@@ -175,7 +193,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
 
                 const SizedBox(height: 32),
 
-                // 🎯 LANGUAGE CONFIGURATION SECTION
+                // 🎯 SIMPLIFIED LANGUAGE SELECTION
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
@@ -209,7 +227,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Language Settings',
+                                  'Your Language',
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 16,
@@ -217,7 +235,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                                   ),
                                 ),
                                 Text(
-                                  'Configure your speaking and display languages',
+                                  'Language you speak & want to see',
                                   style: TextStyle(
                                     color: Colors.grey,
                                     fontSize: 12,
@@ -231,35 +249,12 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
 
                       const SizedBox(height: 20),
 
-                      // Speaking Language Selection
-                      _buildLanguageSection(
-                        title: '🎤 I speak',
-                        subtitle: 'Language you will speak in the meeting',
-                        selectedLanguage: _selectedSpeakingLanguage,
-                        onLanguageChanged: (language) {
-                          setState(() {
-                            _selectedSpeakingLanguage = language;
-                          });
-                        },
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // Display Language Selection
-                      _buildLanguageSection(
-                        title: '👁️ I want to see everything in',
-                        subtitle: 'All conversations will be translated to this language',
-                        selectedLanguage: _selectedDisplayLanguage,
-                        onLanguageChanged: (language) {
-                          setState(() {
-                            _selectedDisplayLanguage = language;
-                          });
-                        },
-                      ),
+                      // Language selection dropdown
+                      _buildLanguageDropdown(),
 
                       const SizedBox(height: 16),
 
-                      // Language preview
+                      // Explanation
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
@@ -269,23 +264,32 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                             color: Colors.blue.withOpacity(0.3),
                           ),
                         ),
-                        child: Row(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(
-                              Icons.info_outline,
-                              color: Colors.blue,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'You speak ${SupportedLanguages.getLanguageFlag(_selectedSpeakingLanguage)} ${SupportedLanguages.getLanguageName(_selectedSpeakingLanguage)}, see everything in ${SupportedLanguages.getLanguageFlag(_selectedDisplayLanguage)} ${SupportedLanguages.getLanguageName(_selectedDisplayLanguage)}',
-                                style: const TextStyle(
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.info_outline,
                                   color: Colors.blue,
-                                  fontSize: 12,
+                                  size: 16,
                                 ),
-                              ),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'How it works:',
+                                  style: TextStyle(
+                                    color: Colors.blue,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
+                            const SizedBox(height: 8),
+                            _buildExplanationItem('🎤 You speak ${_getLanguageName(_selectedLanguage)}'),
+                            _buildExplanationItem('🌐 Everyone hears real-time translation to their language'),
+                            _buildExplanationItem('👂 You see all conversations in ${_getLanguageName(_selectedLanguage)}'),
+                            _buildExplanationItem('⚡ Powered by Google Cloud AI'),
                           ],
                         ),
                       ),
@@ -322,7 +326,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                       const Icon(Icons.video_call, size: 20),
                       const SizedBox(width: 8),
                       const Text(
-                        'Join with Translation',
+                        'Join Meeting',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -330,7 +334,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '${SupportedLanguages.getLanguageFlag(_selectedSpeakingLanguage)} → ${SupportedLanguages.getLanguageFlag(_selectedDisplayLanguage)}',
+                        _getLanguageFlag(_selectedLanguage),
                         style: const TextStyle(fontSize: 16),
                       ),
                     ],
@@ -353,7 +357,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                     children: [
                       Row(
                         children: [
-                          Icon(
+                          const Icon(
                             Icons.check_circle,
                             color: Colors.green,
                             size: 16,
@@ -361,7 +365,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                           const SizedBox(width: 12),
                           const Expanded(
                             child: Text(
-                              'Real-time Translation Features',
+                              'Translation Features',
                               style: TextStyle(
                                 color: Colors.green,
                                 fontSize: 14,
@@ -381,7 +385,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 40), // Extra padding for scroll
+                const SizedBox(height: 40),
               ],
             ),
           ),
@@ -408,124 +412,70 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
     );
   }
 
-  Widget _buildLanguageSection({
-    required String title,
-    required String subtitle,
-    required String selectedLanguage,
-    required Function(String) onLanguageChanged,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: const TextStyle(
-            color: Colors.grey,
-            fontSize: 11,
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Language selection grid
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 4,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-          ),
-          itemCount: _getPopularLanguages().length,
-          itemBuilder: (context, index) {
-            final langCode = _getPopularLanguages()[index];
-            final isSelected = langCode == selectedLanguage;
-
-            return InkWell(
-              onTap: () => onLanguageChanged(langCode),
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? GcbAppTheme.primary.withOpacity(0.2)
-                      : Colors.grey[800],
-                  borderRadius: BorderRadius.circular(10),
-                  border: isSelected ? Border.all(
-                    color: GcbAppTheme.primary,
-                    width: 2,
-                  ) : null,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      SupportedLanguages.getLanguageFlag(langCode),
-                      style: const TextStyle(fontSize: 14),
+  Widget _buildLanguageDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.grey[800],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[700]!),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedLanguage,
+          isExpanded: true,
+          dropdownColor: GcbAppTheme.surface,
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+          items: _languages.entries.map((entry) {
+            return DropdownMenuItem<String>(
+              value: entry.key,
+              child: Row(
+                children: [
+                  Text(
+                    _getLanguageFlag(entry.key),
+                    style: const TextStyle(fontSize: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _getLanguageName(entry.key),
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
                     ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        SupportedLanguages.getLanguageName(langCode),
-                        style: TextStyle(
-                          color: isSelected ? GcbAppTheme.primary : Colors.white,
-                          fontSize: 11,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             );
+          }).toList(),
+          onChanged: (String? newValue) {
+            if (newValue != null) {
+              setState(() {
+                _selectedLanguage = newValue;
+              });
+            }
           },
         ),
+      ),
+    );
+  }
 
-        const SizedBox(height: 8),
-
-        // More languages button
-        InkWell(
-          onTap: () => _showAllLanguagesDialog(selectedLanguage, onLanguageChanged),
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: Colors.grey[600]!,
-                width: 1,
+  Widget _buildExplanationItem(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: Colors.blue[300],
+                fontSize: 11,
               ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.more_horiz,
-                  color: Colors.grey[400],
-                  size: 16,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'More languages',
-                  style: TextStyle(
-                    color: Colors.grey[400],
-                    fontSize: 12,
-                  ),
-                ),
-              ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -549,71 +499,12 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
     );
   }
 
-  List<String> _getPopularLanguages() {
-    return ['vi', 'en', 'zh', 'ja', 'ko', 'es', 'fr', 'de'];
+  String _getLanguageFlag(String languageCode) {
+    return _languages[languageCode]?.split(' ').first ?? '';
   }
 
-  void _showAllLanguagesDialog(String currentSelection, Function(String) onChanged) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: GcbAppTheme.surface,
-        title: const Text(
-          'Select Language',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: ListView.builder(
-            itemCount: SupportedLanguages.getAllLanguageCodes().length,
-            itemBuilder: (context, index) {
-              final langCode = SupportedLanguages.getAllLanguageCodes()[index];
-              final isSelected = langCode == currentSelection;
-
-              return ListTile(
-                leading: Text(
-                  SupportedLanguages.getLanguageFlag(langCode),
-                  style: const TextStyle(fontSize: 24),
-                ),
-                title: Text(
-                  SupportedLanguages.getLanguageName(langCode),
-                  style: TextStyle(
-                    color: isSelected ? GcbAppTheme.primary : Colors.white,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  ),
-                ),
-                subtitle: Text(
-                  SupportedLanguages.getNativeName(langCode),
-                  style: TextStyle(
-                    color: Colors.grey[400],
-                    fontSize: 12,
-                  ),
-                ),
-                trailing: isSelected
-                    ? const Icon(
-                  Icons.check_circle,
-                  color: GcbAppTheme.primary,
-                )
-                    : null,
-                onTap: () {
-                  onChanged(langCode);
-                  Navigator.of(context).pop();
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.grey),
-            ),
-          ),
-        ],
-      ),
-    );
+  String _getLanguageName(String languageCode) {
+    final fullName = _languages[languageCode] ?? '';
+    return fullName.substring(fullName.indexOf(' ') + 1);
   }
 }

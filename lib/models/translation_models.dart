@@ -1,309 +1,495 @@
-// lib/models/translation_models.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
+// lib/models/translation_models.dart - LANGUAGE MANAGEMENT FOR INTEGRATED TRANSLATION
 
-// 🎯 TRANSCRIPTION DATA MODEL
-class TranscriptionData {
-  final String id;
-  final String userId;
-  final String userName;
-  final String originalText;
-  final String originalLanguage;
-  final DateTime timestamp;
-  final double confidence;
-  final bool isFinal;
-  final Map<String, String> translations; // language_code -> translated_text
-
-  TranscriptionData({
-    required this.id,
-    required this.userId,
-    required this.userName,
-    required this.originalText,
-    required this.originalLanguage,
-    required this.timestamp,
-    required this.confidence,
-    required this.isFinal,
-    required this.translations,
-  });
-
-  // Create from Firestore document
-  factory TranscriptionData.fromFirestore(Map<String, dynamic> data) {
-    return TranscriptionData(
-      id: data['id'] ?? '',
-      userId: data['userId'] ?? '',
-      userName: data['userName'] ?? '',
-      originalText: data['originalText'] ?? '',
-      originalLanguage: data['originalLanguage'] ?? 'en',
-      timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      confidence: (data['confidence'] ?? 0.0).toDouble(),
-      isFinal: data['isFinal'] ?? true,
-      translations: Map<String, String>.from(data['translations'] ?? {}),
-    );
-  }
-
-  // Convert to Firestore document
-  Map<String, dynamic> toFirestore() {
-    return {
-      'id': id,
-      'userId': userId,
-      'userName': userName,
-      'originalText': originalText,
-      'originalLanguage': originalLanguage,
-      'timestamp': Timestamp.fromDate(timestamp),
-      'confidence': confidence,
-      'isFinal': isFinal,
-      'translations': translations,
-      'type': isFinal ? 'final' : 'partial',
-    };
-  }
-
-  // Get translation for specific language
-  String getTranslation(String targetLanguage) {
-    if (targetLanguage == originalLanguage) {
-      return originalText;
-    }
-    return translations[targetLanguage] ?? originalText;
-  }
-
-  // Copy with updated translations
-  TranscriptionData copyWith({
-    String? id,
-    String? userId,
-    String? userName,
-    String? originalText,
-    String? originalLanguage,
-    DateTime? timestamp,
-    double? confidence,
-    bool? isFinal,
-    Map<String, String>? translations,
-  }) {
-    return TranscriptionData(
-      id: id ?? this.id,
-      userId: userId ?? this.userId,
-      userName: userName ?? this.userName,
-      originalText: originalText ?? this.originalText,
-      originalLanguage: originalLanguage ?? this.originalLanguage,
-      timestamp: timestamp ?? this.timestamp,
-      confidence: confidence ?? this.confidence,
-      isFinal: isFinal ?? this.isFinal,
-      translations: translations ?? Map<String, String>.from(this.translations),
-    );
-  }
-
-  @override
-  String toString() {
-    return 'TranscriptionData(id: $id, user: $userName, text: "$originalText", lang: $originalLanguage, final: $isFinal)';
-  }
-}
-
-// 🎯 SPEECH TRANSCRIPTION MODEL (for UI widgets)
-class SpeechTranscription {
-  final String id;
-  final String speakerId;
-  final String speakerName;
-  final String originalText;
-  final String originalLanguage;
-  final DateTime timestamp;
-  final double confidence;
-  final bool isFinal;
-  final Map<String, String> translations;
-
-  SpeechTranscription({
-    required this.id,
-    required this.speakerId,
-    required this.speakerName,
-    required this.originalText,
-    required this.originalLanguage,
-    required this.timestamp,
-    required this.confidence,
-    required this.isFinal,
-    required this.translations,
-  });
-
-  factory SpeechTranscription.fromTranscriptionData(TranscriptionData data) {
-    return SpeechTranscription(
-      id: data.id,
-      speakerId: data.userId,
-      speakerName: data.userName,
-      originalText: data.originalText,
-      originalLanguage: data.originalLanguage,
-      timestamp: data.timestamp,
-      confidence: data.confidence,
-      isFinal: data.isFinal,
-      translations: Map<String, String>.from(data.translations),
-    );
-  }
-
-  String getTranslation(String targetLanguage) {
-    if (targetLanguage == originalLanguage) {
-      return originalText;
-    }
-    return translations[targetLanguage] ?? originalText;
-  }
-}
-
-// 🎯 USER PREFERENCE MODEL
-class UserPreference {
-  final String userId;
-  final String displayLanguage;
-  final String speakingLanguage;
-
-  UserPreference({
-    required this.userId,
-    required this.displayLanguage,
-    required this.speakingLanguage,
-  });
-
-  UserPreference copyWith({
-    String? userId,
-    String? displayLanguage,
-    String? speakingLanguage,
-  }) {
-    return UserPreference(
-      userId: userId ?? this.userId,
-      displayLanguage: displayLanguage ?? this.displayLanguage,
-      speakingLanguage: speakingLanguage ?? this.speakingLanguage,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'userId': userId,
-      'displayLanguage': displayLanguage,
-      'speakingLanguage': speakingLanguage,
-    };
-  }
-
-  factory UserPreference.fromMap(Map<String, dynamic> map) {
-    return UserPreference(
-      userId: map['userId'] ?? '',
-      displayLanguage: map['displayLanguage'] ?? 'en',
-      speakingLanguage: map['speakingLanguage'] ?? 'en',
-    );
-  }
-}
-
-// 🎯 LANGUAGE SUPPORT MODEL
-class LanguageSupport {
-  final String code;
-  final String name;
-  final String nativeName;
-  final bool isSupported;
-
-  const LanguageSupport({
-    required this.code,
-    required this.name,
-    required this.nativeName,
-    required this.isSupported,
-  });
-}
-
-// 🎯 SUPPORTED LANGUAGES
+/// 🌐 SUPPORTED LANGUAGES CLASS
 class SupportedLanguages {
-  static const List<LanguageSupport> all = [
-    LanguageSupport(code: 'en', name: 'English', nativeName: 'English', isSupported: true),
-    LanguageSupport(code: 'es', name: 'Spanish', nativeName: 'Español', isSupported: true),
-    LanguageSupport(code: 'fr', name: 'French', nativeName: 'Français', isSupported: true),
-    LanguageSupport(code: 'de', name: 'German', nativeName: 'Deutsch', isSupported: true),
-    LanguageSupport(code: 'it', name: 'Italian', nativeName: 'Italiano', isSupported: true),
-    LanguageSupport(code: 'pt', name: 'Portuguese', nativeName: 'Português', isSupported: true),
-    LanguageSupport(code: 'ru', name: 'Russian', nativeName: 'Русский', isSupported: true),
-    LanguageSupport(code: 'ja', name: 'Japanese', nativeName: '日本語', isSupported: true),
-    LanguageSupport(code: 'ko', name: 'Korean', nativeName: '한국어', isSupported: true),
-    LanguageSupport(code: 'zh', name: 'Chinese', nativeName: '中文', isSupported: true),
-    LanguageSupport(code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', isSupported: true),
-    LanguageSupport(code: 'ar', name: 'Arabic', nativeName: 'العربية', isSupported: true),
-    LanguageSupport(code: 'th', name: 'Thai', nativeName: 'ไทย', isSupported: true),
-    LanguageSupport(code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt', isSupported: true),
+  static const Map<String, Map<String, String>> _languages = {
+    'vi': {
+      'name': 'Vietnamese',
+      'flag': '🇻🇳',
+      'native': 'Tiếng Việt',
+      'googleCode': 'vi-VN',
+      'mlkitCode': 'vi',
+    },
+    'en': {
+      'name': 'English',
+      'flag': '🇺🇸',
+      'native': 'English',
+      'googleCode': 'en-US',
+      'mlkitCode': 'en',
+    },
+    'zh': {
+      'name': 'Chinese',
+      'flag': '🇨🇳',
+      'native': '中文',
+      'googleCode': 'zh-CN',
+      'mlkitCode': 'zh',
+    },
+    'ja': {
+      'name': 'Japanese',
+      'flag': '🇯🇵',
+      'native': '日本語',
+      'googleCode': 'ja-JP',
+      'mlkitCode': 'ja',
+    },
+    'ko': {
+      'name': 'Korean',
+      'flag': '🇰🇷',
+      'native': '한국어',
+      'googleCode': 'ko-KR',
+      'mlkitCode': 'ko',
+    },
+    'th': {
+      'name': 'Thai',
+      'flag': '🇹🇭',
+      'native': 'ไทย',
+      'googleCode': 'th-TH',
+      'mlkitCode': 'th',
+    },
+    'es': {
+      'name': 'Spanish',
+      'flag': '🇪🇸',
+      'native': 'Español',
+      'googleCode': 'es-ES',
+      'mlkitCode': 'es',
+    },
+    'fr': {
+      'name': 'French',
+      'flag': '🇫🇷',
+      'native': 'Français',
+      'googleCode': 'fr-FR',
+      'mlkitCode': 'fr',
+    },
+    'de': {
+      'name': 'German',
+      'flag': '🇩🇪',
+      'native': 'Deutsch',
+      'googleCode': 'de-DE',
+      'mlkitCode': 'de',
+    },
+    'id': {
+      'name': 'Indonesian',
+      'flag': '🇮🇩',
+      'native': 'Bahasa Indonesia',
+      'googleCode': 'id-ID',
+      'mlkitCode': 'id',
+    },
+    'ms': {
+      'name': 'Malay',
+      'flag': '🇲🇾',
+      'native': 'Bahasa Melayu',
+      'googleCode': 'ms-MY',
+      'mlkitCode': 'ms',
+    },
+    'ar': {
+      'name': 'Arabic',
+      'flag': '🇸🇦',
+      'native': 'العربية',
+      'googleCode': 'ar-SA',
+      'mlkitCode': 'ar',
+    },
+    'hi': {
+      'name': 'Hindi',
+      'flag': '🇮🇳',
+      'native': 'हिन्दी',
+      'googleCode': 'hi-IN',
+      'mlkitCode': 'hi',
+    },
+    'it': {
+      'name': 'Italian',
+      'flag': '🇮🇹',
+      'native': 'Italiano',
+      'googleCode': 'it-IT',
+      'mlkitCode': 'it',
+    },
+    'pt': {
+      'name': 'Portuguese',
+      'flag': '🇵🇹',
+      'native': 'Português',
+      'googleCode': 'pt-PT',
+      'mlkitCode': 'pt',
+    },
+    'ru': {
+      'name': 'Russian',
+      'flag': '🇷🇺',
+      'native': 'Русский',
+      'googleCode': 'ru-RU',
+      'mlkitCode': 'ru',
+    },
+  };
+
+  /// Get all supported language codes
+  static List<String> getAllLanguageCodes() {
+    return _languages.keys.toList();
+  }
+
+  /// Get popular/commonly used languages
+  static List<String> getPopularLanguages() {
+    return ['vi', 'en', 'zh', 'ja', 'ko', 'th', 'es', 'fr'];
+  }
+
+  /// Get language display name in English
+  static String getLanguageName(String languageCode) {
+    return _languages[languageCode]?['name'] ?? languageCode.toUpperCase();
+  }
+
+  /// Get language flag emoji
+  static String getLanguageFlag(String languageCode) {
+    return _languages[languageCode]?['flag'] ?? '🌐';
+  }
+
+  /// Get native language name
+  static String getNativeName(String languageCode) {
+    return _languages[languageCode]?['native'] ?? languageCode.toUpperCase();
+  }
+
+  /// Get Google Speech API language code
+  static String getGoogleSpeechCode(String languageCode) {
+    return _languages[languageCode]?['googleCode'] ?? 'en-US';
+  }
+
+  /// Get MLKit translation language code
+  static String getMLKitCode(String languageCode) {
+    return _languages[languageCode]?['mlkitCode'] ?? 'en';
+  }
+
+  /// Check if language is supported
+  static bool isSupported(String languageCode) {
+    return _languages.containsKey(languageCode);
+  }
+
+  /// Get language info object
+  static Map<String, String>? getLanguageInfo(String languageCode) {
+    return _languages[languageCode];
+  }
+
+  /// Get all languages as list of maps
+  static List<Map<String, String>> getAllLanguagesInfo() {
+    return _languages.entries.map((entry) => {
+      'code': entry.key,
+      ...entry.value,
+    }).toList();
+  }
+}
+
+/// 🎯 MEETING LANGUAGE CONFIGURATION
+class MeetingLanguageConfig {
+  final String meetingId;
+  final String hostUserId;
+  final String hostTargetLanguage;
+  final List<String> supportedLanguages;
+  final Map<String, String> participantLanguages; // userId -> targetLanguage
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  MeetingLanguageConfig({
+    required this.meetingId,
+    required this.hostUserId,
+    required this.hostTargetLanguage,
+    required this.supportedLanguages,
+    required this.participantLanguages,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory MeetingLanguageConfig.create({
+    required String meetingId,
+    required String hostUserId,
+    required String hostTargetLanguage,
+  }) {
+    return MeetingLanguageConfig(
+      meetingId: meetingId,
+      hostUserId: hostUserId,
+      hostTargetLanguage: hostTargetLanguage,
+      supportedLanguages: SupportedLanguages.getAllLanguageCodes(),
+      participantLanguages: {hostUserId: hostTargetLanguage},
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  /// Add or update participant language preference
+  MeetingLanguageConfig addParticipant(String userId, String targetLanguage) {
+    final newParticipantLanguages = Map<String, String>.from(participantLanguages);
+    newParticipantLanguages[userId] = targetLanguage;
+
+    return MeetingLanguageConfig(
+      meetingId: meetingId,
+      hostUserId: hostUserId,
+      hostTargetLanguage: hostTargetLanguage,
+      supportedLanguages: supportedLanguages,
+      participantLanguages: newParticipantLanguages,
+      createdAt: createdAt,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  /// Remove participant
+  MeetingLanguageConfig removeParticipant(String userId) {
+    final newParticipantLanguages = Map<String, String>.from(participantLanguages);
+    newParticipantLanguages.remove(userId);
+
+    return MeetingLanguageConfig(
+      meetingId: meetingId,
+      hostUserId: hostUserId,
+      hostTargetLanguage: hostTargetLanguage,
+      supportedLanguages: supportedLanguages,
+      participantLanguages: newParticipantLanguages,
+      createdAt: createdAt,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  /// Get all unique target languages used in meeting
+  List<String> getActiveLanguages() {
+    return participantLanguages.values.toSet().toList();
+  }
+
+  /// Get participant's target language
+  String getParticipantLanguage(String userId) {
+    return participantLanguages[userId] ?? 'en';
+  }
+
+  /// Convert to JSON for Firestore
+  Map<String, dynamic> toJson() {
+    return {
+      'meetingId': meetingId,
+      'hostUserId': hostUserId,
+      'hostTargetLanguage': hostTargetLanguage,
+      'supportedLanguages': supportedLanguages,
+      'participantLanguages': participantLanguages,
+      'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
+    };
+  }
+
+  /// Create from JSON
+  factory MeetingLanguageConfig.fromJson(Map<String, dynamic> json) {
+    return MeetingLanguageConfig(
+      meetingId: json['meetingId'] ?? '',
+      hostUserId: json['hostUserId'] ?? '',
+      hostTargetLanguage: json['hostTargetLanguage'] ?? 'en',
+      supportedLanguages: List<String>.from(json['supportedLanguages'] ?? []),
+      participantLanguages: Map<String, String>.from(json['participantLanguages'] ?? {}),
+      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      updatedAt: DateTime.parse(json['updatedAt'] ?? DateTime.now().toIso8601String()),
+    );
+  }
+}
+
+/// 📊 TRANSLATION STATISTICS
+class TranslationStats {
+  final String meetingId;
+  final int totalTranslations;
+  final int totalSpeechMinutes;
+  final Map<String, int> languageUsage; // languageCode -> usage count
+  final Map<String, double> translationAccuracy; // languageCode -> average confidence
+  final DateTime startTime;
+  final DateTime? endTime;
+
+  TranslationStats({
+    required this.meetingId,
+    required this.totalTranslations,
+    required this.totalSpeechMinutes,
+    required this.languageUsage,
+    required this.translationAccuracy,
+    required this.startTime,
+    this.endTime,
+  });
+
+  factory TranslationStats.create(String meetingId) {
+    return TranslationStats(
+      meetingId: meetingId,
+      totalTranslations: 0,
+      totalSpeechMinutes: 0,
+      languageUsage: {},
+      translationAccuracy: {},
+      startTime: DateTime.now(),
+    );
+  }
+
+  /// Add translation result to stats
+  TranslationStats addTranslation({
+    required String sourceLanguage,
+    required double confidence,
+    required int speechDurationSeconds,
+  }) {
+    final newLanguageUsage = Map<String, int>.from(languageUsage);
+    final newAccuracy = Map<String, double>.from(translationAccuracy);
+
+    // Update language usage
+    newLanguageUsage[sourceLanguage] = (newLanguageUsage[sourceLanguage] ?? 0) + 1;
+
+    // Update accuracy (running average)
+    final currentCount = newLanguageUsage[sourceLanguage]!;
+    final currentAvg = newAccuracy[sourceLanguage] ?? 0.0;
+    newAccuracy[sourceLanguage] = ((currentAvg * (currentCount - 1)) + confidence) / currentCount;
+
+    return TranslationStats(
+      meetingId: meetingId,
+      totalTranslations: totalTranslations + 1,
+      totalSpeechMinutes: totalSpeechMinutes + (speechDurationSeconds / 60).round(),
+      languageUsage: newLanguageUsage,
+      translationAccuracy: newAccuracy,
+      startTime: startTime,
+      endTime: endTime,
+    );
+  }
+
+  /// End the meeting stats
+  TranslationStats endMeeting() {
+    return TranslationStats(
+      meetingId: meetingId,
+      totalTranslations: totalTranslations,
+      totalSpeechMinutes: totalSpeechMinutes,
+      languageUsage: languageUsage,
+      translationAccuracy: translationAccuracy,
+      startTime: startTime,
+      endTime: DateTime.now(),
+    );
+  }
+
+  /// Get meeting duration
+  Duration get meetingDuration {
+    final end = endTime ?? DateTime.now();
+    return end.difference(startTime);
+  }
+
+  /// Get most used language
+  String? get mostUsedLanguage {
+    if (languageUsage.isEmpty) return null;
+    return languageUsage.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+  }
+
+  /// Get overall translation accuracy
+  double get overallAccuracy {
+    if (translationAccuracy.isEmpty) return 0.0;
+    final accuracies = translationAccuracy.values;
+    return accuracies.reduce((a, b) => a + b) / accuracies.length;
+  }
+
+  /// Convert to JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'meetingId': meetingId,
+      'totalTranslations': totalTranslations,
+      'totalSpeechMinutes': totalSpeechMinutes,
+      'languageUsage': languageUsage,
+      'translationAccuracy': translationAccuracy,
+      'startTime': startTime.toIso8601String(),
+      'endTime': endTime?.toIso8601String(),
+    };
+  }
+
+  /// Create from JSON
+  factory TranslationStats.fromJson(Map<String, dynamic> json) {
+    return TranslationStats(
+      meetingId: json['meetingId'] ?? '',
+      totalTranslations: json['totalTranslations'] ?? 0,
+      totalSpeechMinutes: json['totalSpeechMinutes'] ?? 0,
+      languageUsage: Map<String, int>.from(json['languageUsage'] ?? {}),
+      translationAccuracy: Map<String, double>.from(json['translationAccuracy'] ?? {}),
+      startTime: DateTime.parse(json['startTime'] ?? DateTime.now().toIso8601String()),
+      endTime: json['endTime'] != null ? DateTime.parse(json['endTime']) : null,
+    );
+  }
+}
+
+/// 🎛️ INTEGRATION CONSTANTS
+class IntegrationConstants {
+  // Service timeouts
+  static const Duration speechRecognitionTimeout = Duration(seconds: 30);
+  static const Duration translationTimeout = Duration(seconds: 10);
+  static const Duration webrtcConnectionTimeout = Duration(seconds: 45);
+
+  // Audio configuration
+  static const int audioSampleRate = 16000;
+  static const int audioChannels = 1;
+  static const Duration audioBufferDuration = Duration(seconds: 2);
+
+  // Translation thresholds
+  static const double minimumConfidenceThreshold = 0.3;
+  static const int maximumTranslationRetries = 3;
+  static const Duration translationRetryDelay = Duration(seconds: 2);
+
+  // UI update intervals
+  static const Duration realtimeUpdateInterval = Duration(milliseconds: 500);
+  static const Duration statusUpdateInterval = Duration(seconds: 1);
+
+  // Meeting limits
+  static const int maxParticipants = 6;
+  static const int maxSpeechResultsInMemory = 50;
+  static const Duration maxMeetingDuration = Duration(hours: 4);
+
+  // Languages that support real-time processing
+  static const List<String> realtimeOptimizedLanguages = [
+    'en', 'vi', 'zh', 'ja', 'ko', 'es', 'fr', 'de'
   ];
 
-  static LanguageSupport getByCode(String code) {
-    return all.firstWhere(
-          (lang) => lang.code == code,
-      orElse: () => all.first, // Default to English
-    );
-  }
-
-  static String getLanguageFlag(String code) {
-    const flags = {
-      'en': '🇺🇸',
-      'es': '🇪🇸',
-      'fr': '🇫🇷',
-      'de': '🇩🇪',
-      'it': '🇮🇹',
-      'pt': '🇵🇹',
-      'ru': '🇷🇺',
-      'ja': '🇯🇵',
-      'ko': '🇰🇷',
-      'zh': '🇨🇳',
-      'hi': '🇮🇳',
-      'ar': '🇸🇦',
-      'th': '🇹🇭',
-      'vi': '🇻🇳',
-    };
-    return flags[code] ?? '🌐';
-  }
-
-  static String getLanguageName(String code) {
-    return getByCode(code).name;
-  }
-
-  static String getNativeName(String code) {
-    return getByCode(code).nativeName;
-  }
-
-  static List<String> getAllLanguageCodes() {
-    return all.map((lang) => lang.code).toList();
-  }
+  // Default language preferences
+  static const String defaultSpeechLanguage = 'vi';
+  static const String defaultDisplayLanguage = 'vi';
+  static const String fallbackLanguage = 'en';
 }
 
-// 🎯 TRANSLATION STATUS
-enum TranslationStatus {
-  idle,
-  translating,
-  completed,
-  error,
-}
+/// 🔧 INTEGRATION UTILITIES
+class IntegrationUtils {
+  /// Convert short language code to Google Speech code
+  static String toGoogleSpeechCode(String languageCode) {
+    return SupportedLanguages.getGoogleSpeechCode(languageCode);
+  }
 
-// 🎯 SPEECH RECOGNITION STATUS
-enum SpeechStatus {
-  idle,
-  initializing,
-  ready,
-  listening,
-  processing,
-  error,
-  permissionDenied,
-}
+  /// Convert short language code to MLKit code
+  static String toMLKitCode(String languageCode) {
+    return SupportedLanguages.getMLKitCode(languageCode);
+  }
 
-// 🎯 REAL-TIME SUBTITLE DATA
-class SubtitleData {
-  final String text;
-  final String language;
-  final String userId;
-  final String userName;
-  final DateTime timestamp;
-  final bool isFinal;
-  final double confidence;
+  /// Check if language supports real-time processing
+  static bool isRealtimeOptimized(String languageCode) {
+    return IntegrationConstants.realtimeOptimizedLanguages.contains(languageCode);
+  }
 
-  SubtitleData({
-    required this.text,
-    required this.language,
-    required this.userId,
-    required this.userName,
-    required this.timestamp,
-    required this.isFinal,
-    required this.confidence,
-  });
+  /// Get recommended languages for a region
+  static List<String> getRegionalLanguages(String region) {
+    switch (region.toLowerCase()) {
+      case 'asia':
+        return ['vi', 'zh', 'ja', 'ko', 'th', 'id', 'ms', 'hi'];
+      case 'europe':
+        return ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru'];
+      case 'americas':
+        return ['en', 'es', 'pt', 'fr'];
+      case 'africa':
+        return ['en', 'fr', 'ar'];
+      default:
+        return SupportedLanguages.getPopularLanguages();
+    }
+  }
 
-  factory SubtitleData.fromTranscription(TranscriptionData transcription, String targetLanguage) {
-    return SubtitleData(
-      text: transcription.getTranslation(targetLanguage),
-      language: targetLanguage,
-      userId: transcription.userId,
-      userName: transcription.userName,
-      timestamp: transcription.timestamp,
-      isFinal: transcription.isFinal,
-      confidence: transcription.confidence,
-    );
+  /// Format confidence score for display
+  static String formatConfidence(double confidence) {
+    return '${(confidence * 100).round()}%';
+  }
+
+  /// Get language quality indicator
+  static String getLanguageQuality(String languageCode, double confidence) {
+    if (confidence >= 0.9) return 'Excellent';
+    if (confidence >= 0.8) return 'Good';
+    if (confidence >= 0.7) return 'Fair';
+    return 'Poor';
+  }
+
+  /// Generate meeting summary
+  static String generateMeetingSummary(TranslationStats stats) {
+    final duration = stats.meetingDuration;
+    final mostUsed = stats.mostUsedLanguage;
+    final accuracy = stats.overallAccuracy;
+
+    return '''
+Meeting Summary:
+Duration: ${duration.inHours}h ${duration.inMinutes % 60}m
+Total Translations: ${stats.totalTranslations}
+Speech Time: ${stats.totalSpeechMinutes} minutes
+Most Used Language: ${mostUsed != null ? SupportedLanguages.getLanguageName(mostUsed) : 'N/A'}
+Average Accuracy: ${formatConfidence(accuracy)}
+''';
   }
 }

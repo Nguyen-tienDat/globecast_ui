@@ -1,10 +1,14 @@
-// lib/main.dart - WITH NEW GOOGLE SPEECH + MLKIT TRANSLATION
+// lib/main.dart - FIXED SERVICE INTEGRATION
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:globecast_ui/screens/meeting/meeting_screen.dart';
+import 'package:globecast_ui/screens/create_meeting/create_meeting_screen.dart';
+import 'package:globecast_ui/screens/join_meeting/join_meeting_screen.dart';
+import 'package:globecast_ui/screens/test/test_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
-import 'package:globecast_ui/services/google_speech_translation_service.dart'; // ✅ NEW SERVICE
+import 'package:globecast_ui/services/google_speech_translation_service.dart'; // ✅ PRIMARY SERVICE
 import 'package:globecast_ui/services/auth_service.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:globecast_ui/widgets/auth_wrapper.dart';
@@ -21,13 +25,12 @@ void main() async {
   runApp(const GlobecastApp());
 }
 
-// 🔐 REQUEST PERMISSIONS
 Future<void> _requestPermissions() async {
   try {
     final permissions = [
       Permission.microphone,
       Permission.camera,
-      Permission.storage, // For MLKit models
+      Permission.storage,
     ];
 
     Map<Permission, PermissionStatus> statuses = await permissions.request();
@@ -58,308 +61,229 @@ class GlobecastApp extends StatelessWidget {
           create: (context) => WebRTCMeshMeetingService(),
         ),
 
-        // 🎤 NEW GOOGLE SPEECH + MLKIT TRANSLATION SERVICE
+        // ✅ GOOGLE SPEECH TRANSLATION SERVICE (PRIMARY)
         ChangeNotifierProvider(
           create: (context) => GoogleSpeechTranslationService(),
         ),
       ],
       child: MaterialApp(
-        title: 'Globecast - Google Speech + MLKit',
+        title: 'Globecast - Real-time Translation Sync',
         theme: GcbAppTheme.darkTheme,
-        home: const ServiceInitializerV2(),
+        initialRoute: '/init',
         debugShowCheckedModeBanner: false,
+        routes: {
+          '/init': (context) => const ServiceInitializer(),
+          '/': (context) => const AuthWrapper(),
+          '/test': (context) => const SpeechTranslationTestScreen(),
+          '/create': (context) => const EnhancedCreateMeetingScreen(),
+          '/join': (context) => const EnhancedJoinMeetingScreen(),
+        },
+        onGenerateRoute: (settings) {
+          switch (settings.name) {
+            case '/meeting':
+              final args = settings.arguments as Map<String, dynamic>?;
+              return MaterialPageRoute(
+                builder: (context) => MeetingScreen(
+                  code: args?['code'],
+                  displayName: args?['displayName'],
+                  targetLanguage: args?['targetLanguage'],
+                  meetingId: args?['meetingId'],
+                ),
+              );
+            default:
+              return null;
+          }
+        },
       ),
     );
   }
 }
 
-// 🚀 SERVICE INITIALIZER V2 - FOR NEW SPEECH SERVICE
-class ServiceInitializerV2 extends StatefulWidget {
-  const ServiceInitializerV2({super.key});
+// 🚀 SERVICE INITIALIZER - SIMPLIFIED & FIXED
+class ServiceInitializer extends StatefulWidget {
+  const ServiceInitializer({super.key});
 
   @override
-  State<ServiceInitializerV2> createState() => _ServiceInitializerV2State();
+  State<ServiceInitializer> createState() => _ServiceInitializerState();
 }
 
-class _ServiceInitializerV2State extends State<ServiceInitializerV2> {
+class _ServiceInitializerState extends State<ServiceInitializer> {
   bool _isInitializing = true;
-  bool _speechServiceReady = false;
-  bool _webrtcServiceReady = false;
   String _initializationStatus = 'Starting services...';
-  String _speechServiceError = '';
+  Map<String, bool> _serviceStatus = {
+    'webrtc': false,
+    'googleSpeech': false,
+  };
 
   @override
   void initState() {
     super.initState();
-    _initializeServicesV2();
+    _initializeServices();
   }
 
-  Future<void> _initializeServicesV2() async {
+  Future<void> _initializeServices() async {
     try {
       setState(() {
-        _initializationStatus = 'Testing Google Speech + MLKit Translation...';
+        _initializationStatus = 'Initializing WebRTC service...';
       });
 
-      // ✅ TEST NEW SPEECH SERVICE FIRST
-      try {
-        final speechService = context.read<GoogleSpeechTranslationService>();
-
-        // Quick test
-        await speechService.initialize();
-
-        setState(() {
-          _speechServiceReady = true;
-          _initializationStatus = 'Google Speech + MLKit ready!';
-        });
-
-        print('✅ Google Speech + MLKit Translation service ready');
-
-      } catch (e) {
-        setState(() {
-          _speechServiceReady = false;
-          _speechServiceError = e.toString();
-          _initializationStatus = 'Speech service failed, WebRTC only mode';
-        });
-
-        print('⚠️ Speech service failed: $e');
-      }
-
-      // ✅ INITIALIZE WEBRTC (always works)
-      setState(() {
-        _initializationStatus = 'Setting up video calling...';
-      });
-
+      // ✅ STEP 1: Initialize WebRTC Service
       final webrtcService = context.read<WebRTCMeshMeetingService>();
-
-      // Connect services if speech is available
-      if (_speechServiceReady) {
-        final speechService = context.read<GoogleSpeechTranslationService>();
-        // TODO: Connect speech service to WebRTC
-        print('🔗 Connected speech service to WebRTC');
-      }
+      await webrtcService.initialize();
 
       setState(() {
-        _webrtcServiceReady = true;
-        _initializationStatus = 'All services ready!';
+        _serviceStatus['webrtc'] = true;
+        _initializationStatus = 'Initializing Google Speech Translation...';
       });
 
-      // Short delay to show status
+      // ✅ STEP 2: Initialize Google Speech Translation Service
+      final googleSpeechService = context.read<GoogleSpeechTranslationService>();
+      await googleSpeechService.initialize();
+
+      setState(() {
+        _serviceStatus['googleSpeech'] = true;
+        _initializationStatus = '✅ All services ready!';
+      });
+
+      // Wait to show success
       await Future.delayed(const Duration(seconds: 2));
 
       setState(() {
         _isInitializing = false;
       });
+
+      // Navigate to home
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/');
+      }
+
+      print('✅ Services initialized successfully');
+      print('   - WebRTC: ${_serviceStatus['webrtc']}');
+      print('   - Google Speech: ${_serviceStatus['googleSpeech']}');
 
     } catch (e) {
-      print('❌ Service initialization error: $e');
-
       setState(() {
-        _initializationStatus = 'Initialization failed, app will continue';
+        _initializationStatus = '❌ Initialization failed: $e';
       });
 
-      await Future.delayed(const Duration(seconds: 2));
-      setState(() {
-        _isInitializing = false;
-      });
+      print('❌ Error initializing services: $e');
+
+      // Show error and still allow app to continue
+      await Future.delayed(const Duration(seconds: 5));
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+        Navigator.pushReplacementNamed(context, '/');
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isInitializing) {
-      return _buildInitializingScreenV2();
-    }
-
-    return const AuthWrapper();
-  }
-
-  Widget _buildInitializingScreenV2() {
     return Scaffold(
       backgroundColor: GcbAppTheme.background,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Logo
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: GcbAppTheme.primary.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.translate,
-                size: 64,
-                color: GcbAppTheme.primary,
-              ),
+            // Service status indicators
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                // WebRTC ring
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: _serviceStatus['webrtc']! ? Colors.blue : Colors.grey,
+                      width: 3,
+                    ),
+                  ),
+                ),
+                // Google Speech ring
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: _serviceStatus['googleSpeech']! ? Colors.green : Colors.grey,
+                      width: 3,
+                    ),
+                  ),
+                ),
+                // Core
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: _serviceStatus.values.every((status) => status)
+                        ? GcbAppTheme.primary
+                        : Colors.grey[700],
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.sync,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ],
             ),
 
             const SizedBox(height: 32),
 
-            // Title
             const Text(
-              'Globecast V2',
+              'GlobeCast Real-time Translation',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 32,
+                fontSize: 24,
                 fontWeight: FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            const Text(
-              'Google Speech + MLKit Translation',
-              style: TextStyle(
-                color: Colors.grey,
-                fontSize: 16,
               ),
             ),
 
             const SizedBox(height: 48),
 
-            // Loading indicator
-            const CircularProgressIndicator(color: GcbAppTheme.primary),
-            const SizedBox(height: 24),
+            // Progress
+            SizedBox(
+              width: 200,
+              child: LinearProgressIndicator(
+                color: GcbAppTheme.primary,
+                backgroundColor: Colors.grey[800],
+                value: _calculateProgress(),
+              ),
+            ),
 
+            const SizedBox(height: 16),
+
+            // Status
             Text(
               _initializationStatus,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 16,
+                fontSize: 14,
               ),
               textAlign: TextAlign.center,
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 40),
 
             // Service status
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               margin: const EdgeInsets.symmetric(horizontal: 32),
               decoration: BoxDecoration(
                 color: Colors.grey[900],
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey[800]!),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
                 children: [
-                  Text(
-                    'Service Status',
-                    style: TextStyle(
-                      color: Colors.grey[400],
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  _buildServiceIndicatorV2(
-                    'Google Speech API',
-                    _speechServiceReady ? 'Ready' : 'Failed',
-                    _speechServiceReady ? Colors.green : Colors.red,
-                  ),
-                  const SizedBox(height: 12),
-
-                  _buildServiceIndicatorV2(
-                    'MLKit Translation',
-                    _speechServiceReady ? 'Ready' : 'Not Available',
-                    _speechServiceReady ? Colors.green : Colors.orange,
-                  ),
-                  const SizedBox(height: 12),
-
-                  _buildServiceIndicatorV2(
-                    'WebRTC Video Calling',
-                    _webrtcServiceReady ? 'Ready' : 'Initializing...',
-                    _webrtcServiceReady ? Colors.green : Colors.orange,
-                  ),
-                  const SizedBox(height: 12),
-
-                  _buildServiceIndicatorV2(
-                    'Audio Capture',
-                    'Ready',
-                    Colors.green,
-                  ),
-                ],
-              ),
-            ),
-
-            // Error details if speech service failed
-            if (!_speechServiceReady && _speechServiceError.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(16),
-                margin: const EdgeInsets.symmetric(horizontal: 32),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.red.withOpacity(0.3)),
-                ),
-                child: Column(
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.error, color: Colors.red, size: 16),
-                        SizedBox(width: 8),
-                        Text(
-                          'Speech Service Error',
-                          style: TextStyle(
-                            color: Colors.red,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _speechServiceError,
-                      style: const TextStyle(
-                        color: Colors.red,
-                        fontSize: 12,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 24),
-
-            // Service info
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: _speechServiceReady
-                    ? Colors.green.withOpacity(0.1)
-                    : Colors.orange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _speechServiceReady
-                      ? Colors.green.withOpacity(0.3)
-                      : Colors.orange.withOpacity(0.3),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _speechServiceReady ? Icons.check_circle : Icons.warning,
-                    color: _speechServiceReady ? Colors.green : Colors.orange,
-                    size: 16,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _speechServiceReady
-                        ? 'Real-time Translation: Ready'
-                        : 'Video Calling Only Mode',
-                    style: TextStyle(
-                      color: _speechServiceReady ? Colors.green : Colors.orange,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  _buildServiceRow('🕸️ WebRTC Mesh', _serviceStatus['webrtc']!, Colors.blue),
+                  const SizedBox(height: 8),
+                  _buildServiceRow('☁️ Google Speech & Translation', _serviceStatus['googleSpeech']!, Colors.green),
                 ],
               ),
             ),
@@ -369,14 +293,14 @@ class _ServiceInitializerV2State extends State<ServiceInitializerV2> {
     );
   }
 
-  Widget _buildServiceIndicatorV2(String name, String status, Color color) {
+  Widget _buildServiceRow(String name, bool isReady, Color color) {
     return Row(
       children: [
         Container(
           width: 8,
           height: 8,
           decoration: BoxDecoration(
-            color: color,
+            color: isReady ? color : Colors.orange,
             shape: BoxShape.circle,
           ),
         ),
@@ -384,21 +308,22 @@ class _ServiceInitializerV2State extends State<ServiceInitializerV2> {
         Expanded(
           child: Text(
             name,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.white, fontSize: 13),
           ),
         ),
         Text(
-          status,
+          isReady ? 'Ready' : 'Loading...',
           style: TextStyle(
-            color: color,
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
+            color: isReady ? color : Colors.orange,
+            fontSize: 12,
           ),
         ),
       ],
     );
+  }
+
+  double _calculateProgress() {
+    int readyCount = _serviceStatus.values.where((status) => status).length;
+    return readyCount / _serviceStatus.length;
   }
 }

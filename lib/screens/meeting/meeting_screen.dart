@@ -1,11 +1,12 @@
-// lib/screens/meeting/meeting_screen.dart - COMPLETE PRODUCTION READY
+// lib/screens/meeting/meeting_screen.dart - COMPLETE WITH REAL-TIME TRANSLATION SYNC
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
-import 'package:globecast_ui/services/multilingual_speech_service.dart';
+import 'package:globecast_ui/services/google_speech_translation_service.dart';
 
 class MeetingScreen extends StatefulWidget {
   final String? code;
@@ -29,60 +30,81 @@ class _MeetingScreenState extends State<MeetingScreen> {
   // 🎯 STATE MANAGEMENT
   bool _isJoining = false;
   bool _isListening = false;
-  bool _isSTTInitialized = false;
+  bool _isRealtimeInitialized = false;
 
   // 🎯 REAL-TIME TRANSLATION STATE
-  final List<SpeechResult> _speechResults = [];
+  final List<SpeechTranslationResult> _speechResults = [];
   String? _currentSpeakerId;
   String _speechServiceStatus = 'Ready';
   String _lastTranslationTime = '';
 
   // 🎯 UI STATE
   bool _showTranslationOverlay = true;
+  bool _showLanguageSettings = false;
   int _totalTranslations = 0;
+
+  // 🌐 LANGUAGE SETTINGS
+  String _mySpeakingLanguage = 'vi';
+  String _myDisplayLanguage = 'en';
+  List<String> _selectedOutputLanguages = ['en', 'vi', 'zh', 'ja', 'ko'];
+
+  final List<String> _supportedLanguages = [
+    'vi', 'en', 'zh', 'ja', 'ko', 'th', 'es', 'fr', 'de'
+  ];
+
+  final Map<String, String> _languageNames = {
+    'vi': 'Tiếng Việt',
+    'en': 'English',
+    'zh': 'Chinese',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'th': 'Thai',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+  };
+
+  final Map<String, String> _languageFlags = {
+    'vi': '🇻🇳',
+    'en': '🇺🇸',
+    'zh': '🇨🇳',
+    'ja': '🇯🇵',
+    'ko': '🇰🇷',
+    'th': '🇹🇭',
+    'es': '🇪🇸',
+    'fr': '🇫🇷',
+    'de': '🇩🇪',
+  };
 
   @override
   void initState() {
     super.initState();
+    if (widget.targetLanguage != null) {
+      _mySpeakingLanguage = widget.targetLanguage!;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeMeeting();
     });
   }
 
-  // 🚀 COMPLETE MEETING INITIALIZATION
+  // 🚀 INITIALIZE MEETING WITH REAL-TIME TRANSLATION SYNC
   Future<void> _initializeMeeting() async {
     if (_isJoining) return;
 
     setState(() {
       _isJoining = true;
-      _speechServiceStatus = 'Initializing services...';
+      _speechServiceStatus = 'Initializing meeting with real-time translation...';
     });
 
     try {
       final webrtcService = context.read<WebRTCMeshMeetingService>();
-      final speechService = context.read<MultilingualSpeechService>();
+      final googleSpeechService = context.read<GoogleSpeechTranslationService>();
 
       if (kDebugMode) {
-        print('🎯 Starting complete meeting initialization...');
+        print('🎯 Starting meeting initialization with real-time translation sync...');
       }
 
-      // ✅ STEP 1: VERIFY GOOGLE CLOUD SERVICES
-      setState(() {
-        _speechServiceStatus = 'Checking Google Cloud services...';
-      });
-
-      if (!speechService.isAvailable) {
-        setState(() {
-          _speechServiceStatus = 'Initializing Google Cloud...';
-        });
-        await speechService.initialize();
-      }
-
-      if (!speechService.isAvailable) {
-        throw Exception('Google Cloud services not available. Please check your internet connection and credentials.');
-      }
-
-      // ✅ STEP 2: INITIALIZE WEBRTC SERVICE
+      // ✅ STEP 1: INITIALIZE WEBRTC SERVICE
       setState(() {
         _speechServiceStatus = 'Setting up video calling...';
       });
@@ -91,30 +113,37 @@ class _MeetingScreenState extends State<MeetingScreen> {
         await webrtcService.initialize();
       }
 
+      // ✅ STEP 2: INITIALIZE GOOGLE SPEECH SERVICE
+      setState(() {
+        _speechServiceStatus = 'Initializing Google Cloud Speech & Translation...';
+      });
+
+      if (!googleSpeechService.isInitialized) {
+        await googleSpeechService.initialize();
+      }
+
       // ✅ STEP 3: SET USER CONTEXT
       if (widget.displayName != null && widget.displayName!.isNotEmpty) {
         webrtcService.setUserDetails(displayName: widget.displayName!);
       }
 
-      // ✅ STEP 4: CONFIGURE SPEECH SERVICE
+      // ✅ STEP 4: CONFIGURE TRANSLATION SERVICE
       setState(() {
-        _speechServiceStatus = 'Configuring translation settings...';
+        _speechServiceStatus = 'Configuring real-time translation...';
       });
 
-      speechService.setUserContext(
+      googleSpeechService.setUserContext(
           webrtcService.userId ?? 'user_${DateTime.now().millisecondsSinceEpoch}',
           widget.displayName ?? 'User'
       );
 
       final meetingCode = widget.code ?? widget.meetingId;
       if (meetingCode != null && meetingCode.isNotEmpty) {
-        speechService.setTranslationContext(meetingCode);
+        googleSpeechService.setTranslationContext(meetingCode);
       }
 
-      speechService.setPreferredLanguage(widget.targetLanguage ?? 'en');
-      speechService.setTargetLanguages([
-        'en', 'vi', 'zh', 'ja', 'ko', 'es', 'fr', 'de', 'th', 'id', 'ms', 'ar', 'hi'
-      ]);
+      googleSpeechService.setPreferredLanguage(_mySpeakingLanguage);
+      googleSpeechService.setTargetLanguages(_selectedOutputLanguages);
 
       // ✅ STEP 5: JOIN MEETING
       setState(() {
@@ -129,22 +158,21 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
       // ✅ STEP 6: SETUP REAL-TIME LISTENERS
       setState(() {
-        _speechServiceStatus = 'Setting up real-time translation...';
+        _speechServiceStatus = 'Setting up real-time translation listeners...';
       });
 
-      _setupSpeechListeners(speechService);
-      _isSTTInitialized = true;
+      _setupRealtimeSpeechListeners(googleSpeechService);
 
-      // ✅ STEP 7: AUTO START SPEECH RECOGNITION
+      // ✅ STEP 7: INITIALIZE TRANSLATION SYNC FOR ALL PARTICIPANTS
       setState(() {
-        _speechServiceStatus = 'Starting speech recognition...';
+        _speechServiceStatus = 'Setting up real-time translation sync...';
       });
 
-      await Future.delayed(const Duration(milliseconds: 1500));
-      await _startRealSpeechRecognition();
+      await _initializeTranslationSync();
+      _isRealtimeInitialized = true;
 
       setState(() {
-        _speechServiceStatus = '✅ All systems ready';
+        _speechServiceStatus = '✅ Meeting with real-time translation sync ready';
       });
 
       if (mounted) {
@@ -152,9 +180,9 @@ class _MeetingScreenState extends State<MeetingScreen> {
           const SnackBar(
             content: Row(
               children: [
-                Icon(Icons.cloud_done, color: Colors.white, size: 16),
+                Icon(Icons.sync, color: Colors.white, size: 16),
                 SizedBox(width: 8),
-                Text('🎤 Real-time Google Cloud translation active!'),
+                Text('🎤 Meeting with real-time translation sync ready!'),
               ],
             ),
             backgroundColor: Colors.green,
@@ -164,12 +192,12 @@ class _MeetingScreenState extends State<MeetingScreen> {
       }
 
       if (kDebugMode) {
-        print('✅ Complete meeting initialization successful');
+        print('✅ Meeting with real-time translation sync initialized successfully');
         print('   Meeting: $meetingCode');
         print('   User: ${widget.displayName} (${webrtcService.userId})');
-        print('   Target Language: ${widget.targetLanguage}');
-        print('   Google Cloud: ${speechService.isAvailable}');
-        print('   Speech Recognition: $_isListening');
+        print('   Speaking Language: $_mySpeakingLanguage');
+        print('   Display Language: $_myDisplayLanguage');
+        print('   Translation sync: Active');
       }
 
     } catch (e) {
@@ -211,34 +239,225 @@ class _MeetingScreenState extends State<MeetingScreen> {
     }
   }
 
-  // 🎧 SETUP COMPREHENSIVE SPEECH LISTENERS
-  void _setupSpeechListeners(MultilingualSpeechService speechService) {
-    // Listen to speech results
-    speechService.speechResultStream.listen(
-          (result) {
-        if (mounted) {
-          setState(() {
-            // Add new result to the beginning of the list
-            _speechResults.insert(0, result);
+  // 🔧 INITIALIZE TRANSLATION SYNC FOR ALL PARTICIPANTS
+  Future<void> _initializeTranslationSync() async {
+    final meetingCode = widget.code ?? widget.meetingId;
+    if (meetingCode == null || meetingCode.isEmpty) return;
 
-            // Keep only last 25 results for performance
-            if (_speechResults.length > 25) {
-              _speechResults.removeRange(25, _speechResults.length);
+    try {
+      // ✅ START LISTENING TO ALL PARTICIPANT TRANSLATIONS
+      _listenToAllParticipantTranslations();
+
+      // ✅ SAVE MY LANGUAGE PREFERENCES TO FIRESTORE
+      await _saveMyLanguagePreferencesToFirestore();
+
+      if (kDebugMode) {
+        print('🔄 Translation sync initialized for meeting: $meetingCode');
+        print('   Listening to real-time translations from all participants');
+        print('   My preferences saved to Firestore');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error initializing translation sync: $e');
+      }
+    }
+  }
+
+  // 🔧 LISTEN TO TRANSLATIONS FROM ALL PARTICIPANTS
+  void _listenToAllParticipantTranslations() {
+    final meetingCode = widget.code ?? widget.meetingId;
+    if (meetingCode == null || meetingCode.isEmpty) return;
+
+    if (kDebugMode) {
+      print('👂 Listening to real-time translations from all participants...');
+    }
+
+    FirebaseFirestore.instance
+        .collection('meetings')
+        .doc(meetingCode)
+        .collection('real_time_translations')
+        .orderBy('timestamp', descending: true)
+        .limit(50)
+        .snapshots()
+        .listen(
+          (snapshot) {
+        for (var docChange in snapshot.docChanges) {
+          if (docChange.type == DocumentChangeType.added) {
+            final data = docChange.doc.data() as Map<String, dynamic>;
+
+            // ✅ CREATE SPEECH RESULT FROM FIRESTORE DATA
+            final speechResult = SpeechTranslationResult(
+              userId: data['userId'] ?? '',
+              userName: data['userName'] ?? '',
+              originalText: data['originalText'] ?? '',
+              detectedLanguage: data['detectedLanguage'] ?? 'unknown',
+              translations: Map<String, String>.from(data['translations'] ?? {}),
+              confidence: (data['confidence'] ?? 0.0).toDouble(),
+              timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              isFinal: data['isFinal'] ?? false,
+              isFromGoogleSpeech: data['isFromGoogleSpeech'] ?? true,
+            );
+
+            // ✅ ADD TO LOCAL RESULTS (for UI display)
+            if (mounted) {
+              setState(() {
+                // Check if not duplicate
+                final isDuplicate = _speechResults.any((existing) =>
+                existing.userId == speechResult.userId &&
+                    existing.originalText == speechResult.originalText &&
+                    existing.timestamp.difference(speechResult.timestamp).abs().inSeconds < 5
+                );
+
+                if (!isDuplicate) {
+                  _speechResults.insert(0, speechResult);
+
+                  if (_speechResults.length > 50) {
+                    _speechResults.removeRange(50, _speechResults.length);
+                  }
+
+                  _totalTranslations = _speechResults.length;
+                  _currentSpeakerId = speechResult.userId;
+                  _lastTranslationTime = _formatTimestamp(speechResult.timestamp);
+                }
+              });
+
+              if (kDebugMode) {
+                print('📝 Received translation from ${speechResult.userName}:');
+                print('   Original (${speechResult.detectedLanguage}): "${speechResult.originalText}"');
+                print('   Available in: ${speechResult.translations.keys.join(", ")}');
+                print('   My display: ${_getPersonalDisplayText(speechResult)}');
+              }
             }
+          }
+        }
+      },
+      onError: (error) {
+        if (kDebugMode) {
+          print('❌ Error listening to translations: $error');
+        }
+      },
+    );
+  }
 
-            // Update current speaker and stats
+  // 🔧 SAVE MY LANGUAGE PREFERENCES TO FIRESTORE
+  Future<void> _saveMyLanguagePreferencesToFirestore() async {
+    try {
+      final meetingCode = widget.code ?? widget.meetingId;
+      final userId = _getCurrentUserId();
+
+      if (meetingCode == null || meetingCode.isEmpty || userId.isEmpty) return;
+
+      await FirebaseFirestore.instance
+          .collection('meetings')
+          .doc(meetingCode)
+          .collection('participant_languages')
+          .doc(userId)
+          .set({
+        'userId': userId,
+        'userName': widget.displayName ?? 'User',
+        'speakingLanguage': _mySpeakingLanguage,
+        'displayLanguage': _myDisplayLanguage,
+        'outputLanguages': _selectedOutputLanguages,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+
+      if (kDebugMode) {
+        print('💾 My language preferences saved to Firestore');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error saving language preferences: $e');
+      }
+    }
+  }
+
+  // 🔧 SAVE TRANSLATION TO FIRESTORE (for all participants)
+  Future<void> _saveTranslationToFirestore(SpeechTranslationResult result) async {
+    try {
+      final meetingCode = widget.code ?? widget.meetingId;
+      if (meetingCode == null || meetingCode.isEmpty) return;
+
+      await FirebaseFirestore.instance
+          .collection('meetings')
+          .doc(meetingCode)
+          .collection('real_time_translations')
+          .add({
+        'userId': result.userId,
+        'userName': result.userName,
+        'originalText': result.originalText,
+        'detectedLanguage': result.detectedLanguage,
+        'translations': result.translations,
+        'confidence': result.confidence,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isFinal': result.isFinal,
+        'isFromGoogleSpeech': result.isFromGoogleSpeech,
+        'meetingId': meetingCode,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      if (kDebugMode) {
+        print('💾 Translation saved to Firestore for all participants');
+        print('   Available languages: ${result.translations.keys.join(", ")}');
+      }
+
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error saving translation to Firestore: $e');
+      }
+    }
+  }
+
+  // 🔧 PERSONAL DISPLAY LOGIC - Each user sees in their preferred language
+  String _getPersonalDisplayText(SpeechTranslationResult result) {
+    // If this is my own speech, show original
+    if (result.userId == _getCurrentUserId()) {
+      return result.originalText;
+    }
+
+    // If speaker's language matches my display preference, show original
+    if (result.detectedLanguage == _myDisplayLanguage) {
+      return result.originalText;
+    }
+
+    // If translation available in my display language, show translation
+    if (result.translations.containsKey(_myDisplayLanguage)) {
+      return result.translations[_myDisplayLanguage]!;
+    }
+
+    // Fallback: try English
+    if (result.translations.containsKey('en')) {
+      return result.translations['en']!;
+    }
+
+    // Last resort: show original
+    return result.originalText;
+  }
+
+  // 🎧 SETUP REAL-TIME SPEECH LISTENERS WITH FIRESTORE SYNC
+  void _setupRealtimeSpeechListeners(GoogleSpeechTranslationService googleSpeechService) {
+    // Listen to speech results from my own speech
+    googleSpeechService.resultStream.listen(
+          (result) async {
+        if (mounted) {
+          // ✅ SAVE TO FIRESTORE FOR ALL PARTICIPANTS
+          await _saveTranslationToFirestore(result);
+
+          // ✅ ADD TO LOCAL RESULTS (immediate UI update)
+          setState(() {
+            _speechResults.insert(0, result);
+            if (_speechResults.length > 50) {
+              _speechResults.removeRange(50, _speechResults.length);
+            }
             _currentSpeakerId = result.userId;
-            _totalTranslations++;
+            _totalTranslations = _speechResults.length;
             _lastTranslationTime = _formatTimestamp(result.timestamp);
           });
 
           if (kDebugMode) {
-            print('📝 Real Google Cloud speech result:');
-            print('   Speaker: ${result.userName} (${result.userId})');
-            print('   Original (${result.detectedLanguage}): "${result.originalText}"');
-            print('   Confidence: ${(result.confidence * 100).toInt()}%');
-            print('   Translations: ${result.translations.keys.toList()}');
-            print('   Target: ${result.translations[widget.targetLanguage ?? 'en']}');
+            print('📝 My speech result processed and shared:');
+            print('   Original: "${result.originalText}"');
+            print('   Available languages: ${result.translations.keys.join(", ")}');
+            print('   Saved to Firestore for all participants');
           }
         }
       },
@@ -255,7 +474,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
     );
 
     // Listen to status updates
-    speechService.statusStream.listen(
+    googleSpeechService.statusStream.listen(
           (status) {
         if (mounted) {
           setState(() {
@@ -271,100 +490,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
     );
 
     if (kDebugMode) {
-      print('🎧 Speech listeners setup complete');
-    }
-  }
-
-  // 🎤 START REAL SPEECH RECOGNITION
-  Future<void> _startRealSpeechRecognition() async {
-    if (_isListening) {
-      if (kDebugMode) {
-        print('⚠️ Speech recognition already active');
-      }
-      return;
-    }
-
-    try {
-      final speechService = context.read<MultilingualSpeechService>();
-
-      setState(() {
-        _isListening = true;
-        _speechServiceStatus = 'Starting audio capture...';
-      });
-
-      await speechService.startListening(
-        meetingId: widget.code ?? widget.meetingId,
-        userId: _getCurrentUserId(),
-        preferredLanguage: widget.targetLanguage ?? 'en',
-      );
-
-      setState(() {
-        _speechServiceStatus = '🎤 Listening with Google Cloud...';
-      });
-
-      if (kDebugMode) {
-        print('🎤 Real Google Cloud speech recognition started');
-        print('   Meeting: ${widget.code ?? widget.meetingId}');
-        print('   User: ${_getCurrentUserId()}');
-        print('   Language: ${widget.targetLanguage ?? 'en'}');
-      }
-
-    } catch (e) {
-      setState(() {
-        _isListening = false;
-        _speechServiceStatus = 'Failed to start: $e';
-      });
-
-      if (kDebugMode) {
-        print('❌ Error starting speech recognition: $e');
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Speech recognition failed: $e'),
-            backgroundColor: Colors.red,
-            action: SnackBarAction(
-              label: 'Retry',
-              textColor: Colors.white,
-              onPressed: () => _startRealSpeechRecognition(),
-            ),
-          ),
-        );
-      }
-    }
-  }
-
-  // 🛑 STOP SPEECH RECOGNITION
-  Future<void> _stopSpeechRecognition() async {
-    if (!_isListening) return;
-
-    try {
-      setState(() {
-        _speechServiceStatus = 'Stopping speech recognition...';
-      });
-
-      final speechService = context.read<MultilingualSpeechService>();
-      await speechService.stopListening();
-
-      setState(() {
-        _isListening = false;
-        _currentSpeakerId = null;
-        _speechServiceStatus = 'Speech recognition stopped';
-      });
-
-      if (kDebugMode) {
-        print('🛑 Speech recognition stopped');
-      }
-
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Error stopping speech recognition: $e');
-      }
-
-      setState(() {
-        _speechServiceStatus = 'Error stopping: $e';
-      });
+      print('🎧 Real-time speech listeners with Firestore sync setup complete');
     }
   }
 
@@ -374,37 +500,34 @@ class _MeetingScreenState extends State<MeetingScreen> {
       backgroundColor: GcbAppTheme.background,
       body: Consumer<WebRTCMeshMeetingService>(
         builder: (context, service, child) {
-          // Show loading screen during initialization
           if (_isJoining || !service.isInitialized || !service.isMeetingActive) {
             return _buildLoadingScreen(service);
           }
 
-          return Column(
+          return Stack(
             children: [
-              // Enhanced top status bar
-              _buildEnhancedTopStatusBar(service),
-
-              // Main content area
-              Expanded(
-                child: Stack(
-                  children: [
-                    // Main video area
-                    _buildMainVideoArea(service),
-
-                    // Real-time translation overlay
-                    if (_showTranslationOverlay)
-                      Positioned(
-                        bottom: 80,
-                        left: 16,
-                        right: 16,
-                        child: _buildGoogleCloudTranslationOverlay(),
-                      ),
-                  ],
-                ),
+              Column(
+                children: [
+                  _buildEnhancedTopStatusBar(service),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        _buildMainVideoArea(service),
+                        if (_showTranslationOverlay)
+                          Positioned(
+                            bottom: 80,
+                            left: 16,
+                            right: 16,
+                            child: _buildGoogleCloudTranslationOverlay(),
+                          ),
+                      ],
+                    ),
+                  ),
+                  _buildEnhancedBottomControls(service),
+                ],
               ),
-
-              // Enhanced bottom controls
-              _buildEnhancedBottomControls(service),
+              if (_showLanguageSettings)
+                _buildLanguageSettingsPanel(),
             ],
           );
         },
@@ -412,7 +535,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
     );
   }
 
-  // 📊 ENHANCED LOADING SCREEN
+  // 📊 LOADING SCREEN
   Widget _buildLoadingScreen(WebRTCMeshMeetingService service) {
     return Container(
       color: GcbAppTheme.background,
@@ -420,47 +543,41 @@ class _MeetingScreenState extends State<MeetingScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Loading indicator
             Stack(
               alignment: Alignment.center,
               children: [
                 const SizedBox(
-                  width: 80,
-                  height: 80,
+                  width: 100,
+                  height: 100,
                   child: CircularProgressIndicator(
-                    color: GcbAppTheme.primary,
+                    color: Colors.blue,
                     strokeWidth: 3,
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: GcbAppTheme.primary.withOpacity(0.1),
+                    color: Colors.blue.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
-                    Icons.cloud,
-                    color: GcbAppTheme.primary,
-                    size: 32,
+                    Icons.sync,
+                    color: Colors.blue,
+                    size: 40,
                   ),
                 ),
               ],
             ),
-
             const SizedBox(height: 32),
-
-            // Status text
-            Text(
-              _isJoining ? 'Joining Meeting' : 'Setting up Services',
-              style: const TextStyle(
+            const Text(
+              'Meeting with Real-time Translation Sync',
+              style: TextStyle(
                 color: Colors.white,
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
               ),
             ),
-
             const SizedBox(height: 12),
-
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Text(
@@ -473,121 +590,13 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 maxLines: 2,
               ),
             ),
-
-            const SizedBox(height: 40),
-
-            // Service status indicators
-            Container(
-              padding: const EdgeInsets.all(20),
-              margin: const EdgeInsets.symmetric(horizontal: 32),
-              decoration: BoxDecoration(
-                color: Colors.grey[900],
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey[800]!),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    'Service Status',
-                    style: TextStyle(
-                      color: Colors.grey[400],
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  _buildServiceIndicator(
-                    'Google Cloud Speech',
-                    context.read<MultilingualSpeechService>().isAvailable,
-                    Icons.cloud,
-                  ),
-                  const SizedBox(height: 12),
-
-                  _buildServiceIndicator(
-                    'Google Cloud Translation',
-                    context.read<MultilingualSpeechService>().isAvailable,
-                    Icons.translate,
-                  ),
-                  const SizedBox(height: 12),
-
-                  _buildServiceIndicator(
-                    'WebRTC Connection',
-                    service.isMeetingActive,
-                    Icons.videocam,
-                  ),
-                  const SizedBox(height: 12),
-
-                  _buildServiceIndicator(
-                    'Audio Capture',
-                    service.isInitialized,
-                    Icons.mic,
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Meeting info
-            if (widget.code != null)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                ),
-                child: Text(
-                  'Meeting: ${widget.code}',
-                  style: const TextStyle(
-                    color: Colors.blue,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildServiceIndicator(String name, bool isReady, IconData icon) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          color: isReady ? Colors.green : Colors.orange,
-          size: 16,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            name,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: isReady ? Colors.green.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Text(
-            isReady ? 'Ready' : 'Connecting...',
-            style: TextStyle(
-              color: isReady ? Colors.green : Colors.orange,
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // 🎯 ENHANCED TOP STATUS BAR
+  // 🎯 TOP STATUS BAR
   Widget _buildEnhancedTopStatusBar(WebRTCMeshMeetingService service) {
     return Container(
       padding: EdgeInsets.only(
@@ -608,14 +617,13 @@ class _MeetingScreenState extends State<MeetingScreen> {
       ),
       child: Row(
         children: [
-          // Meeting info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.videocam, color: Colors.white, size: 16),
+                    const Icon(Icons.sync, color: Colors.blue, size: 16),
                     const SizedBox(width: 8),
                     Text(
                       widget.code ?? widget.meetingId ?? 'Unknown',
@@ -625,11 +633,28 @@ class _MeetingScreenState extends State<MeetingScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    if (_isRealtimeInitialized)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'SYNC',
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  widget.displayName ?? 'User',
+                  '${_languageFlags[_mySpeakingLanguage]} ${widget.displayName} → ${_languageFlags[_myDisplayLanguage]} Display',
                   style: TextStyle(
                     color: Colors.grey[300],
                     fontSize: 11,
@@ -638,15 +663,12 @@ class _MeetingScreenState extends State<MeetingScreen> {
               ],
             ),
           ),
-
-          // Service status indicators
           Row(
             children: [
-              // Google Cloud status
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: context.read<MultilingualSpeechService>().isAvailable
+                  color: context.read<GoogleSpeechTranslationService>().isInitialized
                       ? Colors.green
                       : Colors.red,
                   borderRadius: BorderRadius.circular(12),
@@ -667,10 +689,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(width: 8),
-
-              // Speech status
               if (_isListening)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -694,30 +713,20 @@ class _MeetingScreenState extends State<MeetingScreen> {
                     ],
                   ),
                 ),
-
               const SizedBox(width: 8),
-
-              // Participants
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.blue,
+                  color: Colors.purple,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.people, color: Colors.white, size: 12),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${service.participants.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  '$_totalTranslations',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -750,7 +759,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'Google Cloud Translation: ${_isListening ? "🟢 Active" : "🔴 Inactive"}',
+                'Translation Sync: ${_isRealtimeInitialized ? "🟢 Active" : "🔴 Inactive"}',
                 style: TextStyle(
                   color: Colors.grey[600],
                   fontSize: 14,
@@ -774,7 +783,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
 
     return Column(
       children: [
-        // Main speaker view
         Expanded(
           flex: 3,
           child: Container(
@@ -782,8 +790,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
             child: _buildVideoTile(service, participants.first, isMainView: true),
           ),
         ),
-
-        // Other participants grid
         if (participants.length > 1)
           Container(
             height: 120,
@@ -842,7 +848,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
         borderRadius: BorderRadius.circular(12),
         child: Stack(
           children: [
-            // Video content
             if (renderer != null && participant.isVideoEnabled)
               Positioned.fill(
                 child: RTCVideoView(
@@ -868,8 +873,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   ),
                 ),
               ),
-
-            // Participant name overlay
             Positioned(
               bottom: 12,
               left: 12,
@@ -892,37 +895,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 ),
               ),
             ),
-
-            // Media status indicators
-            Positioned(
-              top: 12,
-              left: 12,
-              child: Row(
-                children: [
-                  if (!participant.isAudioEnabled)
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.mic_off, color: Colors.white, size: 12),
-                    ),
-                  if (!participant.isVideoEnabled)
-                    Container(
-                      margin: const EdgeInsets.only(left: 4),
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.videocam_off, color: Colors.white, size: 12),
-                    ),
-                ],
-              ),
-            ),
-
-            // Speaking indicator
             if (isCurrentSpeaker)
               Positioned(
                 top: 12,
@@ -936,13 +908,40 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   child: const Icon(Icons.mic, color: Colors.white, size: 14),
                 ),
               ),
+            if (_isListening && participant.isLocal)
+              Positioned(
+                top: 12,
+                left: 12,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.sync, color: Colors.white, size: 10),
+                      SizedBox(width: 2),
+                      Text(
+                        'SYNC',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
-  // 🎯 GOOGLE CLOUD TRANSLATION OVERLAY
+  // 🎯 GOOGLE CLOUD TRANSLATION OVERLAY WITH SYNC
   Widget _buildGoogleCloudTranslationOverlay() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -969,7 +968,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header with enhanced info
+          // Header with sync info
           Row(
             children: [
               Container(
@@ -978,7 +977,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   color: Colors.blue.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.cloud, color: Colors.blue, size: 20),
+                child: const Icon(Icons.sync, color: Colors.blue, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -986,7 +985,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Google Cloud Translation',
+                      'Real-time Translation Sync',
                       style: TextStyle(
                         color: Colors.blue,
                         fontSize: 16,
@@ -994,7 +993,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                       ),
                     ),
                     Text(
-                      'Target: ${_getLanguageName(widget.targetLanguage ?? 'en')}',
+                      'I speak: ${_languageFlags[_mySpeakingLanguage]} → I see: ${_languageFlags[_myDisplayLanguage]}',
                       style: const TextStyle(
                         color: Colors.grey,
                         fontSize: 11,
@@ -1003,7 +1002,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   ],
                 ),
               ),
-              // Status indicators
               if (_isListening)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1085,7 +1083,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
           if (_speechResults.isEmpty)
             _buildEmptyTranslationState()
           else
-            _buildTranslationResults(),
+            _buildTranslationResultsWithSync(),
         ],
       ),
     );
@@ -1096,103 +1094,151 @@ class _MeetingScreenState extends State<MeetingScreen> {
       child: Column(
         children: [
           Icon(
-            _isListening ? Icons.mic : Icons.mic_off,
+            _isListening ? Icons.sync : Icons.sync_disabled,
             size: 32,
             color: Colors.grey[600],
           ),
           const SizedBox(height: 12),
           Text(
             _isListening
-                ? '🎤 Listening for speech...\nSpeak now to see real-time Google Cloud translations'
-                : 'Speech recognition inactive\nTap "Start STT" to begin real-time translation',
+                ? '🎤 Listening for speech...\nReal-time sync active for all participants'
+                : 'Real-time translation sync ready\nTap "Start Translation" to begin',
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.grey, fontSize: 13),
           ),
-          if (!_isListening) ...[
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _isSTTInitialized ? _startRealSpeechRecognition : null,
-              icon: const Icon(Icons.cloud, size: 18),
-              label: const Text('Start Google Cloud STT'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: GcbAppTheme.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
 
-  Widget _buildTranslationResults() {
+  // ✅ BUILD TRANSLATION RESULTS WITH SYNC - Shows translations from all participants
+  Widget _buildTranslationResultsWithSync() {
     return Column(
       children: _speechResults.take(3).map((result) {
+        final isMyResult = result.userId == _getCurrentUserId();
+        final displayText = _getPersonalDisplayText(result);
+        final isTranslated = displayText != result.originalText;
+
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: result.userId == _getCurrentUserId()
+            color: isMyResult
                 ? Colors.blue.withOpacity(0.15)
                 : Colors.grey.withOpacity(0.15),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: Colors.green.withOpacity(0.4),
-              width: 1,
+              color: isTranslated ? Colors.green.withOpacity(0.6) : Colors.blue.withOpacity(0.4),
+              width: isTranslated ? 2 : 1,
             ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Speaker info
+              // Speaker info with language indicators
               Row(
                 children: [
                   Icon(
-                    result.userId == _getCurrentUserId() ? Icons.account_circle : Icons.person,
-                    color: result.userId == _getCurrentUserId() ? Colors.blue : Colors.white,
+                    isMyResult ? Icons.account_circle : Icons.person,
+                    color: isMyResult ? Colors.blue : Colors.white,
                     size: 16,
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    result.userId == _getCurrentUserId() ? 'You' : result.userName,
+                    isMyResult ? 'You' : result.userName,
                     style: TextStyle(
-                      color: result.userId == _getCurrentUserId() ? Colors.blue : Colors.white,
+                      color: isMyResult ? Colors.blue : Colors.white,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(width: 8),
+                  // Speaking language
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.blue.withOpacity(0.3),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
-                      result.detectedLanguage.toUpperCase(),
-                      style: const TextStyle(color: Colors.blue, fontSize: 9),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_languageFlags[result.detectedLanguage] ?? ''),
+                        const SizedBox(width: 2),
+                        Text(
+                          result.detectedLanguage.toUpperCase(),
+                          style: const TextStyle(color: Colors.blue, fontSize: 9),
+                        ),
+                      ],
                     ),
                   ),
+                  // Translation indicator
+                  if (isTranslated) ...[
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_forward, color: Colors.green, size: 12),
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_languageFlags[_myDisplayLanguage] ?? ''),
+                          const SizedBox(width: 2),
+                          Text(
+                            _myDisplayLanguage.toUpperCase(),
+                            style: const TextStyle(color: Colors.green, fontSize: 9),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const Spacer(),
-                  const Icon(Icons.cloud_done, color: Colors.green, size: 12),
+                  const Icon(Icons.sync, color: Colors.green, size: 12),
                 ],
               ),
 
               const SizedBox(height: 8),
 
-              // Translation text
+              // Main text (personalized for each user)
               Text(
-                _getDisplayTextForUser(result),
+                displayText,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 14,
                   height: 1.3,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
+
+              // Show original if translated
+              if (isTranslated && !isMyResult) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Original (${result.detectedLanguage}):',
+                        style: const TextStyle(color: Colors.grey, fontSize: 10),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        result.originalText,
+                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 6),
 
@@ -1205,8 +1251,11 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    'Google Cloud',
-                    style: const TextStyle(color: Colors.green, fontSize: 10),
+                    isTranslated ? 'Translated' : 'Original',
+                    style: TextStyle(
+                      color: isTranslated ? Colors.green : Colors.grey,
+                      fontSize: 10,
+                    ),
                   ),
                   const Spacer(),
                   Text(
@@ -1244,47 +1293,47 @@ class _MeetingScreenState extends State<MeetingScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Mic control
           _buildEnhancedControlButton(
             icon: service.isAudioEnabled ? Icons.mic : Icons.mic_off,
             label: 'Mic',
             isActive: service.isAudioEnabled,
             onPressed: () async => await service.toggleAudio(),
           ),
-
-          // Camera control
           _buildEnhancedControlButton(
             icon: service.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
             label: 'Camera',
             isActive: service.isVideoEnabled,
             onPressed: () async => await service.toggleVideo(),
           ),
-
-          // Speech recognition control
           _buildEnhancedControlButton(
-            icon: _isListening ? Icons.pause : Icons.cloud,
-            label: _isListening ? 'Stop STT' : 'Start STT',
+            icon: _isListening ? Icons.stop : Icons.sync,
+            label: _isListening ? 'Stop Sync' : 'Start Sync',
             isActive: _isListening,
-            onPressed: _isSTTInitialized
+            onPressed: _isRealtimeInitialized
                 ? () async {
               if (_isListening) {
-                await _stopSpeechRecognition();
+                await _stopRealTimeTranslation();
               } else {
-                await _startRealSpeechRecognition();
+                await _startRealTimeTranslation();
               }
             }
                 : null,
           ),
-
-          // Translation history
+          _buildEnhancedControlButton(
+            icon: Icons.language,
+            label: 'Language',
+            onPressed: () {
+              setState(() {
+                _showLanguageSettings = !_showLanguageSettings;
+              });
+            },
+          ),
           _buildEnhancedControlButton(
             icon: Icons.history,
             label: 'History',
             onPressed: () => _showTranslationHistory(),
             badge: _speechResults.isNotEmpty ? _speechResults.length.toString() : null,
           ),
-
-          // Toggle overlay
           _buildEnhancedControlButton(
             icon: _showTranslationOverlay ? Icons.visibility : Icons.visibility_off,
             label: 'Overlay',
@@ -1295,8 +1344,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
               });
             },
           ),
-
-          // End call
           _buildEnhancedControlButton(
             icon: Icons.call_end,
             label: 'End Call',
@@ -1358,7 +1405,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 child: Icon(icon, color: iconColor, size: 22),
               ),
             ),
-            // Badge
             if (badge != null)
               Positioned(
                 top: 0,
@@ -1395,65 +1441,330 @@ class _MeetingScreenState extends State<MeetingScreen> {
     );
   }
 
-  // 🎯 HELPER METHODS
-  String _getDisplayTextForUser(SpeechResult result) {
-    final myUserId = _getCurrentUserId();
-
-    // If this is my own speech, show original text
-    if (result.userId == myUserId) {
-      return result.originalText;
-    }
-
-    // For others' speech, show translation in my target language
-    final myTargetLanguage = widget.targetLanguage ?? 'en';
-
-    // If speaker's language is same as my target language, show original
-    if (result.detectedLanguage == myTargetLanguage) {
-      return result.originalText;
-    }
-
-    // Otherwise, show translation to my target language
-    return result.translations[myTargetLanguage] ?? result.originalText;
-  }
-
-  String _getCurrentUserId() {
+  // 🎤 START REAL-TIME TRANSLATION
+  Future<void> _startRealTimeTranslation() async {
     try {
-      return context.read<WebRTCMeshMeetingService>().userId ?? 'unknown';
+      final googleSpeechService = context.read<GoogleSpeechTranslationService>();
+
+      setState(() {
+        _isListening = true;
+        _speechServiceStatus = 'Starting real-time translation sync...';
+      });
+
+      await googleSpeechService.startListening(
+        meetingId: widget.code ?? widget.meetingId,
+        userId: _getCurrentUserId(),
+        preferredLanguage: _mySpeakingLanguage,
+      );
+
+      setState(() {
+        _speechServiceStatus = '🎤 Translation sync active for all participants...';
+      });
+
+      if (kDebugMode) {
+        print('🎤 Real-time translation sync started');
+      }
+
     } catch (e) {
-      return 'unknown';
+      setState(() {
+        _isListening = false;
+        _speechServiceStatus = 'Failed to start: $e';
+      });
+
+      if (kDebugMode) {
+        print('❌ Error starting real-time translation: $e');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Translation sync failed: $e'),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: () => _startRealTimeTranslation(),
+            ),
+          ),
+        );
+      }
     }
   }
 
-  String _getLanguageName(String languageCode) {
-    const languageNames = {
-      'en': 'English',
-      'vi': 'Vietnamese',
-      'zh': 'Chinese',
-      'ja': 'Japanese',
-      'ko': 'Korean',
-      'th': 'Thai',
-      'id': 'Indonesian',
-      'ms': 'Malay',
-      'es': 'Spanish',
-      'fr': 'French',
-      'de': 'German',
-      'ar': 'Arabic',
-      'hi': 'Hindi',
-    };
-    return languageNames[languageCode] ?? languageCode.toUpperCase();
+  // 🛑 STOP REAL-TIME TRANSLATION
+  Future<void> _stopRealTimeTranslation() async {
+    if (!_isListening) return;
+
+    try {
+      setState(() {
+        _speechServiceStatus = 'Stopping real-time translation sync...';
+      });
+
+      final googleSpeechService = context.read<GoogleSpeechTranslationService>();
+      await googleSpeechService.stopListening();
+
+      setState(() {
+        _isListening = false;
+        _currentSpeakerId = null;
+        _speechServiceStatus = 'Translation sync stopped';
+      });
+
+      if (kDebugMode) {
+        print('🛑 Real-time translation sync stopped');
+      }
+
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error stopping real-time translation: $e');
+      }
+
+      setState(() {
+        _speechServiceStatus = 'Error stopping: $e';
+      });
+    }
   }
 
-  String _formatTimestamp(DateTime timestamp) {
-    final now = DateTime.now();
-    final difference = now.difference(timestamp);
+  // 🌐 LANGUAGE SETTINGS PANEL
+  Widget _buildLanguageSettingsPanel() {
+    return Positioned(
+      top: 0,
+      bottom: 0,
+      right: 0,
+      width: MediaQuery.of(context).size.width * 0.8,
+      child: Container(
+        color: GcbAppTheme.surface,
+        child: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 16,
+                left: 16,
+                right: 16,
+                bottom: 16,
+              ),
+              decoration: BoxDecoration(
+                color: GcbAppTheme.surfaceLight,
+                border: Border(
+                  bottom: BorderSide(color: Colors.grey[800]!),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.sync, color: Colors.white),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Translation Sync Settings',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _showLanguageSettings = false;
+                      });
+                    },
+                    icon: const Icon(Icons.close, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Speaking Language
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.mic, color: Colors.blue, size: 16),
+                              SizedBox(width: 8),
+                              Text(
+                                'Speaking Language (Input)',
+                                style: TextStyle(
+                                  color: Colors.blue,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: _mySpeakingLanguage,
+                            dropdownColor: GcbAppTheme.surface,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Colors.grey[800],
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                            items: _supportedLanguages.map((lang) => DropdownMenuItem(
+                              value: lang,
+                              child: Row(
+                                children: [
+                                  Text(_languageFlags[lang] ?? ''),
+                                  const SizedBox(width: 8),
+                                  Text(_languageNames[lang] ?? lang),
+                                ],
+                              ),
+                            )).toList(),
+                            onChanged: (newLang) async {
+                              if (newLang != null) {
+                                setState(() {
+                                  _mySpeakingLanguage = newLang;
+                                });
+                                final googleSpeechService = context.read<GoogleSpeechTranslationService>();
+                                googleSpeechService.setPreferredLanguage(newLang);
+                                await _saveMyLanguagePreferencesToFirestore();
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Display Language
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.purple.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.visibility, color: Colors.purple, size: 16),
+                              SizedBox(width: 8),
+                              Text(
+                                'Display Language (What I see)',
+                                style: TextStyle(
+                                  color: Colors.purple,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: _myDisplayLanguage,
+                            dropdownColor: GcbAppTheme.surface,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Colors.grey[800],
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                            items: _supportedLanguages.map((lang) => DropdownMenuItem(
+                              value: lang,
+                              child: Row(
+                                children: [
+                                  Text(_languageFlags[lang] ?? ''),
+                                  const SizedBox(width: 8),
+                                  Text(_languageNames[lang] ?? lang),
+                                ],
+                              ),
+                            )).toList(),
+                            onChanged: (newLang) async {
+                              if (newLang != null) {
+                                setState(() {
+                                  _myDisplayLanguage = newLang;
+                                });
+                                await _saveMyLanguagePreferencesToFirestore();
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // Sync Statistics
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: GcbAppTheme.surfaceLight,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Translation Sync Statistics',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _buildStatItem('Total Messages', '$_totalTranslations'),
+                          const SizedBox(height: 8),
+                          _buildStatItem('Sync Status', _isListening ? 'Active' : 'Inactive'),
+                          const SizedBox(height: 8),
+                          _buildStatItem('Service', 'Google Cloud Speech'),
+                          const SizedBox(height: 8),
+                          _buildStatItem('Participants', 'Real-time sync enabled'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-    if (difference.inSeconds < 60) {
-      return '${difference.inSeconds}s ago';
-    } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else {
-      return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
-    }
+  Widget _buildStatItem(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[400],
+            fontSize: 12,
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
   }
 
   // 📊 TRANSLATION HISTORY MODAL
@@ -1473,7 +1784,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
-              // Handle
               Container(
                 width: 40,
                 height: 4,
@@ -1482,17 +1792,14 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-
               const SizedBox(height: 16),
-
-              // Header
               Row(
                 children: [
-                  const Icon(Icons.cloud, color: Colors.blue, size: 24),
+                  const Icon(Icons.sync, color: Colors.blue, size: 24),
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text(
-                      'Google Cloud Translation History',
+                      'Translation Sync History',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 20,
@@ -1513,15 +1820,12 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   ),
                 ],
               ),
-
               const SizedBox(height: 20),
-
-              // Results list
               Expanded(
                 child: _speechResults.isEmpty
                     ? const Center(
                   child: Text(
-                    'No translation history yet\nStart speaking to see results',
+                    'No translation sync history yet\nStart translation to see results from all participants',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.grey, fontSize: 16),
                   ),
@@ -1531,141 +1835,205 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   itemCount: _speechResults.length,
                   itemBuilder: (context, index) {
                     final result = _speechResults[index];
+                    final isMyResult = result.userId == _getCurrentUserId();
+                    final displayText = _getPersonalDisplayText(result);
+                    final isTranslated = displayText != result.originalText;
+
                     return Container(
                       margin: const EdgeInsets.only(bottom: 16),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: result.userId == _getCurrentUserId()
+                        color: isMyResult
                             ? Colors.blue.withOpacity(0.1)
                             : Colors.grey.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Colors.green.withOpacity(0.3),
+                          color: isTranslated ? Colors.green.withOpacity(0.3) : Colors.blue.withOpacity(0.3),
                         ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Header
+                          // Header with sync indicator
                           Row(
                             children: [
                               Icon(
-                                result.userId == _getCurrentUserId()
-                                    ? Icons.account_circle
-                                    : Icons.person,
-                                color: result.userId == _getCurrentUserId()
-                                    ? Colors.blue
-                                    : Colors.white,
+                                isMyResult ? Icons.account_circle : Icons.person,
+                                color: isMyResult ? Colors.blue : Colors.white,
                                 size: 20,
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                result.userId == _getCurrentUserId()
-                                    ? 'You'
-                                    : result.userName,
+                                isMyResult ? 'You' : result.userName,
                                 style: TextStyle(
-                                  color: result.userId == _getCurrentUserId()
-                                      ? Colors.blue
-                                      : Colors.white,
+                                  color: isMyResult ? Colors.blue : Colors.white,
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
                                   color: Colors.blue.withOpacity(0.2),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: Text(
-                                  result.detectedLanguage.toUpperCase(),
-                                  style: const TextStyle(
-                                      color: Colors.blue, fontSize: 10),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(_languageFlags[result.detectedLanguage] ?? ''),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      result.detectedLanguage.toUpperCase(),
+                                      style: const TextStyle(color: Colors.blue, fontSize: 10),
+                                    ),
+                                  ],
                                 ),
                               ),
+                              if (isTranslated) ...[
+                                const SizedBox(width: 4),
+                                const Icon(Icons.arrow_forward, color: Colors.green, size: 12),
+                                const SizedBox(width: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(_languageFlags[_myDisplayLanguage] ?? ''),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _myDisplayLanguage.toUpperCase(),
+                                        style: const TextStyle(color: Colors.green, fontSize: 10),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                               const Spacer(),
+                              const Icon(Icons.sync, color: Colors.green, size: 16),
+                              const SizedBox(width: 4),
                               Text(
                                 _formatTimestamp(result.timestamp),
-                                style: const TextStyle(
-                                    color: Colors.grey, fontSize: 12),
+                                style: const TextStyle(color: Colors.grey, fontSize: 12),
                               ),
                             ],
                           ),
-
                           const SizedBox(height: 12),
-
-                          // Original text
+                          // Display text
                           Container(
-                            padding: const EdgeInsets.all(8),
+                            padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.grey[800],
-                              borderRadius: BorderRadius.circular(6),
+                              color: isTranslated ? Colors.green.withOpacity(0.1) : Colors.grey[800],
+                              borderRadius: BorderRadius.circular(8),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'Original:',
+                                Text(
+                                  isTranslated ? 'Translated:' : 'Original:',
                                   style: TextStyle(
-                                      color: Colors.grey, fontSize: 11),
+                                    color: isTranslated ? Colors.green : Colors.grey,
+                                    fontSize: 12,
+                                  ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  result.originalText,
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 13),
+                                  displayText,
+                                  style: const TextStyle(color: Colors.white, fontSize: 14),
                                 ),
                               ],
                             ),
                           ),
-
-                          const SizedBox(height: 8),
-
-                          // Translation
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
+                          if (isTranslated && !isMyResult) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[800],
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Original (${result.detectedLanguage}):',
+                                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    result.originalText,
+                                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                                  ),
+                                ],
+                              ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Translation (${_getLanguageName(widget.targetLanguage ?? 'en')}):',
-                                  style: const TextStyle(
-                                      color: Colors.blue, fontSize: 11),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _getDisplayTextForUser(result),
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 14),
-                                ),
-                              ],
-                            ),
-                          ),
-
+                          ],
                           const SizedBox(height: 8),
-
+                          // All translations
+                          if (result.translations.isNotEmpty && result.translations.length > 1)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Available in ${result.translations.length} languages:',
+                                    style: const TextStyle(color: Colors.blue, fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ...result.translations.entries.map((entry) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(_languageFlags[entry.key] ?? ''),
+                                        const SizedBox(width: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            entry.key.toUpperCase(),
+                                            style: const TextStyle(color: Colors.blue, fontSize: 9),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            entry.value,
+                                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )).toList(),
+                                ],
+                              ),
+                            ),
+                          const SizedBox(height: 8),
                           // Metadata
                           Row(
                             children: [
-                              const Icon(Icons.cloud_done,
-                                  color: Colors.green, size: 12),
+                              const Icon(Icons.sync, color: Colors.green, size: 12),
                               const SizedBox(width: 4),
-                              Text(
-                                'Google Cloud',
-                                style: const TextStyle(
-                                    color: Colors.green, fontSize: 10),
+                              const Text(
+                                'Real-time Sync',
+                                style: TextStyle(color: Colors.green, fontSize: 10),
                               ),
                               const SizedBox(width: 16),
                               Text(
                                 'Confidence: ${(result.confidence * 100).toInt()}%',
-                                style: const TextStyle(
-                                    color: Colors.grey, fontSize: 10),
+                                style: const TextStyle(color: Colors.grey, fontSize: 10),
                               ),
                             ],
                           ),
@@ -1697,7 +2065,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
           ],
         ),
         content: const Text(
-          'Are you sure you want to end this meeting?\n\nAll translation history will be saved.',
+          'Are you sure you want to end this meeting?\n\n• All translation sync history will be saved\n• Real-time translation will stop\n• Meeting will end for all participants',
           style: TextStyle(color: Colors.grey),
         ),
         actions: [
@@ -1718,9 +2086,9 @@ class _MeetingScreenState extends State<MeetingScreen> {
     );
 
     if (result == true) {
-      // Stop speech recognition
+      // Stop translation
       if (_isListening) {
-        await _stopSpeechRecognition();
+        await _stopRealTimeTranslation();
       }
 
       // Leave meeting
@@ -1733,10 +2101,33 @@ class _MeetingScreenState extends State<MeetingScreen> {
     }
   }
 
+  // 🔧 HELPER METHODS
+  String _getCurrentUserId() {
+    try {
+      return context.read<WebRTCMeshMeetingService>().userId ?? 'unknown';
+    } catch (e) {
+      return 'unknown';
+    }
+  }
+
+  String _formatTimestamp(DateTime timestamp) {
+    final now = DateTime.now();
+    final difference = now.difference(timestamp);
+
+    if (difference.inSeconds < 60) {
+      return '${difference.inSeconds}s ago';
+    } else if (difference.inMinutes < 60) {
+      return '${difference.inMinutes}m ago';
+    } else {
+      return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+    }
+  }
+
   @override
   void dispose() {
+    // Stop translation if active
     if (_isListening) {
-      _stopSpeechRecognition();
+      _stopRealTimeTranslation();
     }
     super.dispose();
   }

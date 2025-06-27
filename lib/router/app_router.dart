@@ -1,4 +1,4 @@
-// lib/router/app_router.dart - UPDATED FOR ENHANCED MEETING
+// lib/router/app_router.dart - UPDATED FOR INTEGRATION
 import 'package:flutter/material.dart';
 import '../screens/auth/welcome_screen.dart';
 import '../screens/auth/signin_screen.dart';
@@ -6,7 +6,7 @@ import '../screens/auth/signup_screen.dart';
 import '../screens/create_meeting/create_meeting_screen.dart';
 import '../screens/home/home_screen.dart';
 import '../screens/join_meeting/join_meeting_screen.dart';
-import '../screens/meeting/meeting_screen.dart';
+import '../screens/meeting/integrated_meeting_screen.dart'; // ✅ NEW INTEGRATED SCREEN
 
 class Routes {
   static const String welcome = '/welcome';
@@ -29,7 +29,7 @@ class Routes {
     // 🎯 ENHANCED CREATE MEETING WITH LANGUAGE SETUP
     createMeeting: (context) => const EnhancedCreateMeetingScreen(),
 
-    // Enhanced meeting route
+    // ✅ INTEGRATED MEETING ROUTE
     meeting: (context) {
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
@@ -60,6 +60,15 @@ class Routes {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Please check your meeting code and try again',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: () => Navigator.pushReplacementNamed(context, Routes.home),
@@ -77,8 +86,8 @@ class Routes {
         );
       }
 
-      // Enhanced MeetingScreen with real-time translation
-      return MeetingScreen(
+      // ✅ NEW: IntegratedMeetingScreen with full WebRTC + Speech integration
+      return IntegratedMeetingScreen(
         code: code,
         displayName: displayName,
         targetLanguage: targetLanguage,

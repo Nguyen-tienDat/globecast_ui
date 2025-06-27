@@ -1,4 +1,4 @@
-// lib/services/multilingual_speech_service.dart - FIXED ALL ERRORS
+// lib/services/multilingual_speech_service.dart - ENHANCED FOR PERSONAL TRANSLATION
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -8,8 +8,9 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:googleapis_auth/auth_io.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
-// 🎯 SPEECH RESULT MODEL - DEFINED HERE
+// 🎯 ENHANCED SPEECH RESULT MODEL FOR PERSONAL TRANSLATION
 class SpeechResult {
   final String userId;
   final String userName;
@@ -36,7 +37,22 @@ class SpeechResult {
     return 'SpeechResult(user: $userName, text: "$originalText", lang: $detectedLanguage, confidence: $confidence)';
   }
 
-  // Create a copy with updated values
+  // Get text for specific user's display language
+  String getTextForUser(String userDisplayLanguage, String currentUserId) {
+    // If this is the current user's own speech, show original
+    if (userId == currentUserId) {
+      return originalText;
+    }
+
+    // If the detected language matches user's display language, show original
+    if (detectedLanguage == userDisplayLanguage) {
+      return originalText;
+    }
+
+    // Otherwise, show translation to user's display language
+    return translations[userDisplayLanguage] ?? originalText;
+  }
+
   SpeechResult copyWith({
     String? userId,
     String? userName,
@@ -59,7 +75,6 @@ class SpeechResult {
     );
   }
 
-  // Convert to JSON
   Map<String, dynamic> toJson() {
     return {
       'userId': userId,
@@ -73,7 +88,6 @@ class SpeechResult {
     };
   }
 
-  // Create from JSON
   factory SpeechResult.fromJson(Map<String, dynamic> json) {
     return SpeechResult(
       userId: json['userId'] ?? '',
@@ -85,6 +99,43 @@ class SpeechResult {
       timestamp: DateTime.parse(json['timestamp'] ?? DateTime.now().toIso8601String()),
       isFinal: json['isFinal'] ?? false,
     );
+  }
+}
+
+// 🎯 USER LANGUAGE PREFERENCES MODEL
+class UserLanguagePreferences {
+  final String userId;
+  final String userName;
+  final String speakingLanguage;
+  final String displayLanguage;
+  final DateTime lastUpdated;
+
+  UserLanguagePreferences({
+    required this.userId,
+    required this.userName,
+    required this.speakingLanguage,
+    required this.displayLanguage,
+    required this.lastUpdated,
+  });
+
+  factory UserLanguagePreferences.fromJson(Map<String, dynamic> json) {
+    return UserLanguagePreferences(
+      userId: json['userId'] ?? '',
+      userName: json['userName'] ?? '',
+      speakingLanguage: json['speakingLanguage'] ?? 'vi',
+      displayLanguage: json['displayLanguage'] ?? 'vi',
+      lastUpdated: (json['lastUpdated'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'userId': userId,
+      'userName': userName,
+      'speakingLanguage': speakingLanguage,
+      'displayLanguage': displayLanguage,
+      'lastUpdated': FieldValue.serverTimestamp(),
+    };
   }
 }
 
@@ -107,12 +158,15 @@ class MultilingualSpeechService extends ChangeNotifier {
   Timer? _processingTimer;
   static const int PROCESSING_INTERVAL_MS = 2000; // Process every 2 seconds
 
-  // 🎯 USER CONTEXT
+  // 🎯 USER CONTEXT AND PREFERENCES
   String _currentUserId = '';
   String _currentUserName = '';
   String _meetingId = '';
-  String _preferredLanguage = 'en';
-  List<String> _targetLanguages = ['en', 'vi', 'zh', 'ja', 'ko', 'th', 'id', 'ms'];
+  String _mySpeakingLanguage = 'vi';    // Language I speak
+  String _myDisplayLanguage = 'vi';     // Language I want to see
+
+  // 👥 PARTICIPANTS' LANGUAGE PREFERENCES
+  final Map<String, UserLanguagePreferences> _participantPreferences = {};
 
   // 📡 RESULT STREAM
   final StreamController<SpeechResult> _speechResultController = StreamController<SpeechResult>.broadcast();
@@ -121,6 +175,11 @@ class MultilingualSpeechService extends ChangeNotifier {
   // 🧠 PROCESSING STATE
   String _currentStatus = 'Initializing...';
   String _lastProcessedText = '';
+
+  // 🌐 SUPPORTED LANGUAGES
+  final List<String> _supportedLanguages = [
+    'vi', 'en', 'zh', 'ja', 'ko', 'th', 'id', 'ms', 'es', 'fr', 'de', 'ar', 'hi'
+  ];
 
   // 🌐 LANGUAGE MAPPING FOR GOOGLE CLOUD
   static const Map<String, String> _languageCodes = {
@@ -143,9 +202,11 @@ class MultilingualSpeechService extends ChangeNotifier {
   bool get isListening => _isListening;
   bool get isAvailable => _isInitialized && _authenticatedClient != null;
   String get currentStatus => _currentStatus;
-  String get preferredLanguage => _preferredLanguage;
+  String get mySpeakingLanguage => _mySpeakingLanguage;
+  String get myDisplayLanguage => _myDisplayLanguage;
   Stream<SpeechResult> get speechResultStream => _speechResultController.stream;
   Stream<String> get statusStream => _statusController.stream;
+  Map<String, UserLanguagePreferences> get participantPreferences => Map.unmodifiable(_participantPreferences);
 
   // 🚀 INITIALIZE WITH GOOGLE CLOUD CREDENTIALS
   Future<void> initialize() async {
@@ -172,24 +233,29 @@ class MultilingualSpeechService extends ChangeNotifier {
         ],
       );
 
+      _updateStatus('Loading personal language preferences...');
+
+      // Load personal language preferences
+      await _loadPersonalPreferences();
+
       _updateStatus('Testing Google Cloud APIs...');
 
-      // Test Speech API
+      // Test APIs
       await _testSpeechAPI();
-
-      // Test Translation API
       await _testTranslationAPI();
 
       // Setup audio capture listeners
       _setupAudioListeners();
 
       _isInitialized = true;
-      _updateStatus('✅ Google Cloud services ready');
+      _updateStatus('✅ Personal translation ready');
 
       if (kDebugMode) {
-        print('✅ MultilingualSpeechService initialized with Google Cloud');
+        print('✅ MultilingualSpeechService initialized with personal translation');
         print('   Project ID: $_projectId');
-        print('   Target Languages: $_targetLanguages');
+        print('   My Speaking Language: $_mySpeakingLanguage');
+        print('   My Display Language: $_myDisplayLanguage');
+        print('   Supported Languages: $_supportedLanguages');
       }
 
     } catch (e) {
@@ -198,6 +264,54 @@ class MultilingualSpeechService extends ChangeNotifier {
         print('❌ Failed to initialize speech service: $e');
       }
       rethrow;
+    }
+  }
+
+  // 📱 LOAD PERSONAL LANGUAGE PREFERENCES
+  Future<void> _loadPersonalPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _mySpeakingLanguage = prefs.getString('speaking_language') ?? 'vi';
+      _myDisplayLanguage = prefs.getString('display_language') ?? 'vi';
+
+      if (kDebugMode) {
+        print('📱 Loaded personal preferences:');
+        print('   Speaking: $_mySpeakingLanguage');
+        print('   Display: $_myDisplayLanguage');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ Could not load preferences, using defaults: $e');
+      }
+    }
+  }
+
+  // 💾 SAVE PERSONAL LANGUAGE PREFERENCES
+  Future<void> savePersonalPreferences(String speakingLanguage, String displayLanguage) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('speaking_language', speakingLanguage);
+      await prefs.setString('display_language', displayLanguage);
+
+      _mySpeakingLanguage = speakingLanguage;
+      _myDisplayLanguage = displayLanguage;
+
+      // Update in Firestore if in meeting
+      if (_meetingId.isNotEmpty && _currentUserId.isNotEmpty) {
+        await _saveMyPreferencesToFirestore();
+      }
+
+      if (kDebugMode) {
+        print('💾 Saved personal preferences:');
+        print('   Speaking: $_mySpeakingLanguage');
+        print('   Display: $_myDisplayLanguage');
+      }
+
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error saving preferences: $e');
+      }
     }
   }
 
@@ -319,24 +433,89 @@ class MultilingualSpeechService extends ChangeNotifier {
   // 🎯 SET TRANSLATION CONTEXT
   void setTranslationContext(String meetingId) {
     _meetingId = meetingId;
+
+    // Setup Firestore listeners for participant preferences
+    if (meetingId.isNotEmpty) {
+      _listenToParticipantPreferences();
+
+      // Save my preferences to Firestore
+      if (_currentUserId.isNotEmpty) {
+        _saveMyPreferencesToFirestore();
+      }
+    }
+
     if (kDebugMode) {
       print('🎯 Meeting context: $meetingId');
     }
   }
 
-  // 🌐 SET PREFERRED LANGUAGE
-  void setPreferredLanguage(String languageCode) {
-    _preferredLanguage = languageCode;
-    if (kDebugMode) {
-      print('🌐 Preferred language: $languageCode');
+  // 👂 LISTEN TO PARTICIPANT LANGUAGE PREFERENCES
+  void _listenToParticipantPreferences() {
+    if (_meetingId.isEmpty) return;
+
+    FirebaseFirestore.instance
+        .collection('meetings')
+        .doc(_meetingId)
+        .collection('language_preferences')
+        .snapshots()
+        .listen((snapshot) {
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final prefs = UserLanguagePreferences.fromJson(data);
+        _participantPreferences[prefs.userId] = prefs;
+      }
+
+      if (kDebugMode) {
+        print('👂 Updated participant preferences: ${_participantPreferences.length} participants');
+      }
+
+      notifyListeners();
+    });
+  }
+
+  // 💾 SAVE MY PREFERENCES TO FIRESTORE
+  Future<void> _saveMyPreferencesToFirestore() async {
+    if (_meetingId.isEmpty || _currentUserId.isEmpty) return;
+
+    try {
+      final prefs = UserLanguagePreferences(
+        userId: _currentUserId,
+        userName: _currentUserName,
+        speakingLanguage: _mySpeakingLanguage,
+        displayLanguage: _myDisplayLanguage,
+        lastUpdated: DateTime.now(),
+      );
+
+      await FirebaseFirestore.instance
+          .collection('meetings')
+          .doc(_meetingId)
+          .collection('language_preferences')
+          .doc(_currentUserId)
+          .set(prefs.toJson());
+
+      if (kDebugMode) {
+        print('💾 Saved my preferences to Firestore');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error saving preferences to Firestore: $e');
+      }
     }
   }
 
-  // 🎯 SET TARGET LANGUAGES
-  void setTargetLanguages(List<String> languages) {
-    _targetLanguages = languages;
+  // 🌐 SET PREFERRED LANGUAGE (for backward compatibility)
+  void setPreferredLanguage(String languageCode) {
+    _mySpeakingLanguage = languageCode;
     if (kDebugMode) {
-      print('🎯 Target languages: $languages');
+      print('🌐 Speaking language: $languageCode');
+    }
+  }
+
+  // 🎯 SET TARGET LANGUAGES (for backward compatibility)
+  void setTargetLanguages(List<String> languages) {
+    // All supported languages are always target languages for personal translation
+    if (kDebugMode) {
+      print('🎯 All supported languages are targets: $_supportedLanguages');
     }
   }
 
@@ -367,11 +546,11 @@ class MultilingualSpeechService extends ChangeNotifier {
 
     try {
       // Update context
-      if (meetingId != null) _meetingId = meetingId;
-      if (userId != null) _currentUserId = userId;
-      if (preferredLanguage != null) _preferredLanguage = preferredLanguage;
+      if (meetingId != null) setTranslationContext(meetingId);
+      if (userId != null && _currentUserName.isNotEmpty) setUserContext(userId, _currentUserName);
+      if (preferredLanguage != null) _mySpeakingLanguage = preferredLanguage;
 
-      _updateStatus('🎤 Starting audio capture...');
+      _updateStatus('🎤 Starting personal translation...');
 
       // Start native audio recording
       final result = await _audioChannel.invokeMethod('startRecording');
@@ -384,7 +563,7 @@ class MultilingualSpeechService extends ChangeNotifier {
       _startProcessingTimer();
 
       _isListening = true;
-      _updateStatus('🎤 Listening for speech...');
+      _updateStatus('🎤 Listening with personal translation...');
       notifyListeners();
 
     } catch (e) {
@@ -401,7 +580,7 @@ class MultilingualSpeechService extends ChangeNotifier {
     if (!_isListening) return;
 
     try {
-      _updateStatus('🛑 Stopping audio capture...');
+      _updateStatus('🛑 Stopping personal translation...');
 
       // Stop processing timer
       _processingTimer?.cancel();
@@ -414,7 +593,7 @@ class MultilingualSpeechService extends ChangeNotifier {
       await _audioChannel.invokeMethod('stopRecording');
 
       _isListening = false;
-      _updateStatus('✅ Ready');
+      _updateStatus('✅ Ready for personal translation');
       notifyListeners();
 
       if (kDebugMode) {
@@ -499,7 +678,7 @@ class MultilingualSpeechService extends ChangeNotifier {
         'config': {
           'encoding': 'LINEAR16',
           'sampleRateHertz': 16000,
-          'languageCode': _languageCodes[_preferredLanguage] ?? 'en-US',
+          'languageCode': _languageCodes[_mySpeakingLanguage] ?? 'vi-VN',
           'enableAutomaticPunctuation': true,
           'enableWordTimeOffsets': false,
           'model': 'latest_long',
@@ -533,7 +712,7 @@ class MultilingualSpeechService extends ChangeNotifier {
                 print('📝 Transcript: "$transcriptText" (confidence: ${(confidence * 100).toInt()}%)');
               }
 
-              await _processTranscript(transcriptText, confidence);
+              await _processTranscriptWithPersonalTranslation(transcriptText, confidence);
             }
           }
         }
@@ -552,8 +731,8 @@ class MultilingualSpeechService extends ChangeNotifier {
     }
   }
 
-  // 🌐 PROCESS TRANSCRIPT WITH TRANSLATION
-  Future<void> _processTranscript(String transcript, double confidence) async {
+  // 🌐 PROCESS TRANSCRIPT WITH PERSONAL TRANSLATION
+  Future<void> _processTranscriptWithPersonalTranslation(String transcript, double confidence) async {
     if (_authenticatedClient == null || _projectId == null) {
       _updateStatus('❌ Missing authentication or project ID');
       return;
@@ -575,21 +754,33 @@ class MultilingualSpeechService extends ChangeNotifier {
         body: json.encode(detectRequestBody),
       );
 
-      String detectedLanguage = _preferredLanguage;
+      String detectedLanguage = _mySpeakingLanguage;
 
       if (detectResponse.statusCode == 200) {
         final detectResult = json.decode(detectResponse.body);
         if (detectResult['languages'] != null && detectResult['languages'].isNotEmpty) {
-          detectedLanguage = detectResult['languages'][0]['languageCode'];
+          String fullLanguageCode = detectResult['languages'][0]['languageCode'];
+          // Convert from full code (e.g., 'vi-VN') to short code (e.g., 'vi')
+          detectedLanguage = fullLanguageCode.split('-')[0];
         }
       }
 
-      _updateStatus('🌐 Translating to ${_targetLanguages.length} languages...');
+      _updateStatus('🌐 Creating personal translations...');
+
+      // Get all unique display languages from participants
+      final Set<String> targetLanguages = <String>{_myDisplayLanguage};
+      for (final prefs in _participantPreferences.values) {
+        targetLanguages.add(prefs.displayLanguage);
+      }
+
+      if (kDebugMode) {
+        print('🎯 Target languages for translation: $targetLanguages');
+      }
 
       // Translate to all target languages
       final Map<String, String> translations = {};
 
-      for (final targetLang in _targetLanguages) {
+      for (final targetLang in targetLanguages) {
         if (targetLang == detectedLanguage) {
           translations[targetLang] = transcript;
         } else {
@@ -618,13 +809,14 @@ class MultilingualSpeechService extends ChangeNotifier {
         await _saveToFirestore(speechResult);
       }
 
-      _updateStatus('✅ Translation completed');
+      _updateStatus('✅ Personal translation completed');
 
       if (kDebugMode) {
-        print('✅ Speech result processed:');
+        print('✅ Personal speech result processed:');
         print('   Original: "$transcript"');
         print('   Language: $detectedLanguage');
         print('   Translations: ${translations.length} languages');
+        print('   For participants with display languages: $targetLanguages');
       }
 
     } catch (e) {
@@ -682,6 +874,7 @@ class MultilingualSpeechService extends ChangeNotifier {
           .add({
         ...result.toJson(),
         'meetingId': _meetingId,
+        'speakerDisplayLanguage': _myDisplayLanguage,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -704,6 +897,16 @@ class MultilingualSpeechService extends ChangeNotifier {
     if (kDebugMode) {
       print('📱 Status: $status');
     }
+  }
+
+  // 🎯 GET PARTICIPANT DISPLAY LANGUAGE
+  String getParticipantDisplayLanguage(String userId) {
+    return _participantPreferences[userId]?.displayLanguage ?? 'en';
+  }
+
+  // 🎯 GET TEXT FOR CURRENT USER
+  String getTextForCurrentUser(SpeechResult result) {
+    return result.getTextForUser(_myDisplayLanguage, _currentUserId);
   }
 
   // 🧹 DISPOSE
