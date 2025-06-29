@@ -672,8 +672,7 @@ class MultilingualSpeechService extends ChangeNotifier {
       }
 
       _updateStatus('🗣️ Converting speech to text...');
-
-      // Prepare Speech-to-Text request
+     // Prepare Speech-to-Text request
       final requestBody = {
         'config': {
           'encoding': 'LINEAR16',
