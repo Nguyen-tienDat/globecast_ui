@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
 import 'package:globecast_ui/services/central_translation_service.dart';
+
+import '../../services/google_speech_translation_service.dart';
 
 class MeetingScreen extends StatefulWidget {
   final String? code;
@@ -29,6 +32,7 @@ class MeetingScreen extends StatefulWidget {
 class _MeetingScreenState extends State<MeetingScreen> {
   // 🎯 STATE MANAGEMENT
   bool _isJoining = false;
+  bool _isListening = false;
   bool _isTranslating = false;
   bool _isHubInitialized = false;
 
@@ -43,9 +47,13 @@ class _MeetingScreenState extends State<MeetingScreen> {
   int _totalTranslations = 0;
 
   // 🌐 LANGUAGE SETTINGS - CENTRAL HUB APPROACH
-  String _mySpeakingLanguage = 'vi';    // What I speak
-  String _myDisplayLanguage = 'en';     // What I want to see
+  String _mySpeakingLanguage = '';    // What I speak
+  String _myDisplayLanguage = '';     // What I want to see
   String _currentUserId = '';
+  List<String> _selectedOutputLanguages = ['en', 'vi', 'zh', 'ja', 'ko'];
+  final List<String> _supportedLanguages = [
+    'vi', 'en', 'zh', 'ja', 'ko', 'th', 'es', 'fr', 'de'
+  ];
 
   final Map<String, String> _languageNames = {
     'vi': 'Tiếng Việt',
@@ -89,20 +97,64 @@ class _MeetingScreenState extends State<MeetingScreen> {
   void initState() {
     super.initState();
 
-    // ✅ OVERRIDE FROM WIDGET PARAMS
-    if (widget.targetLanguage != null) {
-      _myDisplayLanguage = widget.targetLanguage!;
-      // Smart language pairing
-      if (widget.targetLanguage == 'vi') {
-        _mySpeakingLanguage = 'en'; // English speaker wants Vietnamese
-      } else {
-        _mySpeakingLanguage = 'vi'; // Vietnamese speaker wants other language
-      }
-    }
-
+    // ✅ LOAD USER LANGUAGE PREFERENCES FROM SHARED PREFERENCES
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeMeetingWithCentralHub();
+      _loadUserLanguagePreferences();
     });
+  }
+
+  // 🌐 LOAD USER LANGUAGE PREFERENCES FROM SHARED PREFERENCES
+  Future<void> _loadUserLanguagePreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Load saved language preferences
+      final savedSpeakingLanguage = prefs.getString('speaking_language');
+      final savedDisplayLanguage = prefs.getString('display_language');
+
+      setState(() {
+        // ✅ USE SAVED PREFERENCES IF AVAILABLE
+        if (savedSpeakingLanguage != null && savedSpeakingLanguage.isNotEmpty) {
+          _mySpeakingLanguage = savedSpeakingLanguage;
+        } else {
+          // Default fallback only if no saved preference
+          _mySpeakingLanguage = 'vi'; // Default to Vietnamese
+        }
+
+        if (savedDisplayLanguage != null && savedDisplayLanguage.isNotEmpty) {
+          _myDisplayLanguage = savedDisplayLanguage;
+        } else if (widget.targetLanguage != null) {
+          // Use widget parameter as fallback
+          _myDisplayLanguage = widget.targetLanguage!;
+        } else {
+          // Final fallback
+          _myDisplayLanguage = 'en'; // Default to English
+        }
+      });
+
+      if (kDebugMode) {
+        print('🌐 FIXED: Loaded user language preferences:');
+        print('   Speaking: $_mySpeakingLanguage (from: ${savedSpeakingLanguage != null ? "SharedPreferences" : "default"})');
+        print('   Display: $_myDisplayLanguage (from: ${savedDisplayLanguage != null ? "SharedPreferences" : widget.targetLanguage != null ? "widget" : "default"})');
+      }
+
+      // Initialize meeting after loading preferences
+      await _initializeMeetingWithCentralHub();
+
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error loading language preferences: $e');
+      }
+      
+      // Fallback to defaults if loading fails
+      setState(() {
+        _mySpeakingLanguage = 'vi';
+        _myDisplayLanguage = widget.targetLanguage ?? 'en';
+      });
+
+      // Still initialize meeting
+      await _initializeMeetingWithCentralHub();
+    }
   }
 
   // 🚀 INITIALIZE MEETING WITH CENTRAL TRANSLATION HUB
@@ -1417,11 +1469,11 @@ class _MeetingScreenState extends State<MeetingScreen> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.hub, color: Colors.white),
+                  const Icon(Icons.sync, color: Colors.white),
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text(
-                      'Central Translation Hub Settings',
+                      'Translation Sync Settings',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -1440,10 +1492,229 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 ],
               ),
             ),
-            // ... rest of language settings (same as before)
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Speaking Language
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.mic, color: Colors.blue, size: 16),
+                              SizedBox(width: 8),
+                              Text(
+                                'Speaking Language (Input)',
+                                style: TextStyle(
+                                  color: Colors.blue,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: _mySpeakingLanguage,
+                            dropdownColor: GcbAppTheme.surface,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Colors.grey[800],
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                              items: _supportedLanguages.map((lang) => DropdownMenuItem(
+                              value: lang,
+                              child: Row(
+                                children: [
+                                  Text(_languageFlags[lang] ?? ''),
+                                  const SizedBox(width: 8),
+                                  Text(_languageNames[lang] ?? lang),
+                                ],
+                              ),
+                            )).toList(),
+                            onChanged: (newLang) async {
+                              if (newLang != null) {
+                                setState(() {
+                                  _mySpeakingLanguage = newLang;
+                                  _myDisplayLanguage = newLang; // Set display language to match speaking language
+                                });
+                                
+                                // ✅ SAVE TO SHARED PREFERENCES
+                                final prefs = await SharedPreferences.getInstance();
+                                await prefs.setString('speaking_language', newLang);
+                                await prefs.setString('display_language', newLang);
+                                
+                                // Update services
+                                final centralTranslationService = context.read<CentralTranslationService>();
+                                await centralTranslationService.updateLanguagePreferences(
+                                  speakingLanguage: newLang,
+                                  displayLanguage: newLang
+                                );
+                                
+                                final googleSpeechService = context.read<GoogleSpeechTranslationService>();
+                                googleSpeechService.setPreferredLanguage(newLang);
+                                
+                                await _saveMyLanguagePreferencesToFirestore();
+                                
+                                if (kDebugMode) {
+                                  print('🌐 FIXED: Speaking and display language updated to $newLang and saved to SharedPreferences');
+                                }
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Display Language
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.purple.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.visibility, color: Colors.purple, size: 16),
+                              SizedBox(width: 8),
+                              Text(
+                                'Display Language (What I see)',
+                                style: TextStyle(
+                                  color: Colors.purple,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: _myDisplayLanguage,
+                            dropdownColor: GcbAppTheme.surface,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Colors.grey[800],
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                            items: _supportedLanguages.map((lang) => DropdownMenuItem(
+                              value: lang,
+                              child: Row(
+                                children: [
+                                  Text(_languageFlags[lang] ?? ''),
+                                  const SizedBox(width: 8),
+                                  Text(_languageNames[lang] ?? lang),
+                                ],
+                              ),
+                            )).toList(),
+                            onChanged: (newLang) async {
+                              if (newLang != null) {
+                                setState(() {
+                                  _myDisplayLanguage = newLang;
+                                });
+                                
+                                // ✅ SAVE TO SHARED PREFERENCES
+                                final prefs = await SharedPreferences.getInstance();
+                                await prefs.setString('display_language', newLang);
+                                
+                                // Update services
+                                final centralTranslationService = context.read<CentralTranslationService>();
+                                await centralTranslationService.updateLanguagePreferences(displayLanguage: newLang);
+                                
+                                await _saveMyLanguagePreferencesToFirestore();
+                                
+                                if (kDebugMode) {
+                                  print('🌐 FIXED: Display language updated to $newLang and saved to SharedPreferences');
+                                }
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // Sync Statistics
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: GcbAppTheme.surfaceLight,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Translation Sync Statistics',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _buildStatItem('Total Messages', '$_totalTranslations'),
+                          const SizedBox(height: 8),
+                          _buildStatItem('Sync Status', _isListening ? 'Active' : 'Inactive'),
+                          const SizedBox(height: 8),
+                          _buildStatItem('Service', 'Google Cloud Speech'),
+                          const SizedBox(height: 8),
+                          _buildStatItem('Participants', 'Real-time sync enabled'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildStatItem(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[400],
+            fontSize: 12,
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1525,6 +1796,36 @@ class _MeetingScreenState extends State<MeetingScreen> {
       ),
     );
   }
+  Future<void> _saveMyLanguagePreferencesToFirestore() async {
+    try {
+      final meetingCode = widget.code ?? widget.meetingId;
+      final userId = _currentUserId;
+
+      if (meetingCode == null || meetingCode.isEmpty || userId.isEmpty) return;
+
+      await FirebaseFirestore.instance
+          .collection('meetings')
+          .doc(meetingCode)
+          .collection('participant_languages')
+          .doc(userId)
+          .set({
+        'userId': userId,
+        'userName': widget.displayName ?? 'User',
+        'speakingLanguage': _mySpeakingLanguage,
+        'displayLanguage': _myDisplayLanguage,
+        'outputLanguages': _selectedOutputLanguages,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+
+      if (kDebugMode) {
+        print('💾 My language preferences saved to Firestore');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error saving language preferences: $e');
+      }
+    }
+  }
 
   // 🔚 END CALL DIALOG (unchanged)
   Future<void> _showEndCallDialog(WebRTCMeshMeetingService service) async {
@@ -1600,3 +1901,4 @@ class _MeetingScreenState extends State<MeetingScreen> {
     super.dispose();
   }
 }
+

@@ -240,6 +240,7 @@ class _LanguageSettingsScreenState extends State<LanguageSettingsScreen> {
               onLanguageChanged: (language) {
                 setState(() {
                   _selectedSpeakingLanguage = language;
+                  _selectedDisplayLanguage = language; // Set display language to match speaking language
                 });
               },
             ),

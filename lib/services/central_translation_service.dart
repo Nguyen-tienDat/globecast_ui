@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'google_speech_translation_service.dart'; // ✅ USE IMPROVED SERVICE
+import 'google_cloud_translation_service.dart'; // ✅ ADD GOOGLE CLOUD TRANSLATION
 
 // 🎯 CENTRAL TRANSLATION RESULT MODEL (same as before)
 class CentralTranslationResult {
@@ -89,6 +90,9 @@ class CentralTranslationService extends ChangeNotifier {
   GoogleSpeechTranslationService? _googleSpeechService;
   final Map<String, OnDeviceTranslator> _translators = {};
 
+  // 🌐 GOOGLE CLOUD TRANSLATION SERVICE (for reliable fallback)
+  GoogleCloudTranslationService? _googleCloudTranslation;
+
   // 🎯 SERVICE STATE
   bool _isInitialized = false;
   bool _isListening = false;
@@ -156,10 +160,13 @@ class CentralTranslationService extends ChangeNotifier {
       // 1. Initialize Improved Google Speech Service
       await _initializeImprovedGoogleSpeech();
 
-      // 2. Initialize MLKit Translation
+      // 2. Initialize Google Cloud Translation (reliable backup)
+      await _initializeGoogleCloudTranslation();
+
+      // 3. Initialize MLKit Translation
       await _initializeMLKitTranslation();
 
-      // 3. Setup listeners
+      // 4. Setup listeners
       _setupImprovedSpeechListeners();
 
       _isInitialized = true;
@@ -168,6 +175,7 @@ class CentralTranslationService extends ChangeNotifier {
       if (kDebugMode) {
         print('✅ UPDATED CentralTranslationService initialized');
         print('   🎙️ Using Improved Google Speech Service');
+        print('   ☁️ Google Cloud Translation: ${_googleCloudTranslation?.isReady ?? false}');
         print('   🌐 MLKit Translators: ${_translators.length}');
         print('   📡 Supported languages: ${_supportedLanguages.length}');
         print('   🎯 Optimized for long sentences');
@@ -201,23 +209,49 @@ class CentralTranslationService extends ChangeNotifier {
     }
   }
 
-  // 🔧 INITIALIZE MLKIT TRANSLATION (for additional languages)
+  // ☁️ INITIALIZE GOOGLE CLOUD TRANSLATION SERVICE
+  Future<void> _initializeGoogleCloudTranslation() async {
+    try {
+      _googleCloudTranslation = GoogleCloudTranslationService.instance;
+      await _googleCloudTranslation!.initialize();
+
+      if (kDebugMode) {
+        print('✅ Google Cloud Translation Service initialized');
+        print('   🌐 Ready for reliable translation fallback');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ Google Cloud Translation initialization failed: $e');
+        print('   Will continue with MLKit only');
+      }
+      // Not critical, continue without Google Cloud Translation
+      _googleCloudTranslation = null;
+    }
+  }
+
+  // 🔧 INITIALIZE MLKIT TRANSLATION (tối ưu cho real-time)
   Future<void> _initializeMLKitTranslation() async {
     try {
       _translators.clear();
       int createdTranslators = 0;
 
-      final supportedMLKitLanguages = _getSupportedMLKitLanguages();
+      // ✅ CHỈ TẠO TRANSLATOR CHO CÁC NGÔN NGỮ CHÍNH (tối ưu real-time)
+      final priorityLanguages = ['vi', 'en', 'zh', 'ja', 'ko', 'es', 'fr'];
+      final allSupportedLanguages = _getSupportedMLKitLanguages();
 
-      // Create additional translators for languages not handled by Google Speech
-      for (String fromLang in supportedMLKitLanguages.keys) {
-        for (String toLang in supportedMLKitLanguages.keys) {
+      if (kDebugMode) {
+        print('🎯 Creating MLKit translators for priority languages: $priorityLanguages');
+      }
+
+      // Tạo translator cho các cặp ngôn ngữ ưu tiên
+      for (String fromLang in priorityLanguages) {
+        for (String toLang in priorityLanguages) {
           if (fromLang != toLang) {
             final translatorKey = '${fromLang}_$toLang';
 
             try {
-              final fromLanguage = supportedMLKitLanguages[fromLang];
-              final toLanguage = supportedMLKitLanguages[toLang];
+              final fromLanguage = allSupportedLanguages[fromLang];
+              final toLanguage = allSupportedLanguages[toLang];
 
               if (fromLanguage != null && toLanguage != null) {
                 final translator = OnDeviceTranslator(
@@ -227,10 +261,14 @@ class CentralTranslationService extends ChangeNotifier {
 
                 _translators[translatorKey] = translator;
                 createdTranslators++;
+
+                if (kDebugMode && createdTranslators <= 5) {
+                  print('   ✅ Created: $fromLang → $toLang');
+                }
               }
             } catch (e) {
               if (kDebugMode) {
-                print('⚠️ Could not create additional translator $fromLang -> $toLang: $e');
+                print('⚠️ Could not create translator $fromLang -> $toLang: $e');
               }
             }
           }
@@ -238,13 +276,16 @@ class CentralTranslationService extends ChangeNotifier {
       }
 
       if (kDebugMode) {
-        print('✅ Additional MLKit Translation initialized with $createdTranslators translators');
+        print('✅ MLKit Translation initialized with $createdTranslators priority translators');
+        print('   🎯 Optimized for real-time performance');
+        print('   📊 Priority languages: ${priorityLanguages.length} (${createdTranslators} pairs)');
+        print('   💡 Other languages will use Google Cloud Translation fallback');
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Additional MLKit Translation initialization failed: $e');
+        print('❌ MLKit Translation initialization failed: $e');
       }
-      // Not critical, continue without additional translators
+      // Not critical, continue without translators
     }
   }
 
@@ -463,28 +504,68 @@ class CentralTranslationService extends ChangeNotifier {
   // 🌐 TRANSLATE TEXT WITH MLKIT (for missing languages)
   Future<String> _translateTextWithMLKit(String text, String fromLang, String toLang) async {
     try {
+      // 1. Try MLKit translation first
       final translatorKey = '${fromLang}_$toLang';
       final translator = _translators[translatorKey];
 
       if (translator != null) {
         final translatedText = await translator.translateText(text);
+        if (kDebugMode) {
+          print('✅ MLKit translation success ($fromLang -> $toLang): "$text" → "$translatedText"');
+        }
         return translatedText;
       } else {
-        // Fallback to enhanced mock if no translator available
-        return _getEnhancedMockTranslation(text, fromLang, toLang);
+        if (kDebugMode) {
+          print('⚠️ No MLKit translator for $fromLang -> $toLang, trying Google Cloud...');
+        }
+        // 2. Fallback to Google Cloud Translation
+        return await _translateWithGoogleCloud(text, fromLang, toLang);
       }
     } catch (e) {
       if (kDebugMode) {
         print('❌ MLKit translation error ($fromLang -> $toLang): $e');
+        print('   Trying Google Cloud Translation fallback...');
+      }
+      // 3. Fallback to Google Cloud Translation on MLKit error
+      return await _translateWithGoogleCloud(text, fromLang, toLang);
+    }
+  }
+
+  // ☁️ TRANSLATE WITH GOOGLE CLOUD (reliable fallback)
+  Future<String> _translateWithGoogleCloud(String text, String fromLang, String toLang) async {
+    try {
+      if (_googleCloudTranslation?.isReady == true) {
+        final translatedText = await _googleCloudTranslation!.translateText(
+          text: text,
+          targetLanguage: toLang,
+          sourceLanguage: fromLang,
+        );
+
+        if (kDebugMode) {
+          print('✅ Google Cloud translation success ($fromLang -> $toLang): "$text" → "$translatedText"');
+        }
+
+        return translatedText;
+      } else {
+        if (kDebugMode) {
+          print('⚠️ Google Cloud Translation not available, using enhanced mock');
+        }
+        return _getEnhancedMockTranslation(text, fromLang, toLang);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Google Cloud translation error ($fromLang -> $toLang): $e');
+        print('   Using enhanced mock as final fallback');
       }
       return _getEnhancedMockTranslation(text, fromLang, toLang);
     }
   }
 
-  // 🎭 ENHANCED MOCK TRANSLATION (for unsupported language pairs)
+  // 🎭 ENHANCED MOCK TRANSLATION (backup cho tất cả ngôn ngữ)
   String _getEnhancedMockTranslation(String text, String fromLang, String toLang) {
-    // Use same enhanced mock as Google Speech service
+    // ✅ MOCK DATA CHO TẤT CẢ CÁC CẶP NGÔN NGỮ CHÍNH
     const enhancedMockTranslations = {
+      // VIETNAMESE TO OTHER LANGUAGES
       'vi_en': {
         'Xin chào': 'Hello',
         'tôi tên là': 'my name is',
@@ -497,7 +578,59 @@ class CentralTranslationService extends ChangeNotifier {
         'hệ thống': 'system',
         'dịch thuật': 'translation',
         'và': 'and',
+        'Có nghĩa là': 'It means',
+        'nếu như': 'if',
+        'mà': 'that',
+        'bạn': 'you',
+        'có': 'have',
+        'Hello': 'Hello',
+        'good': 'good',
+        'afternoon': 'afternoon',
       },
+      'vi_es': {
+        'Xin chào': 'Hola',
+        'tôi tên là': 'mi nombre es',
+        'tôi là': 'soy',
+        'đến từ': 'de',
+        'Việt Nam': 'Vietnam',
+        'hôm nay': 'hoy',
+        'tôi muốn': 'quiero',
+        'test': 'prueba',
+        'hệ thống': 'sistema',
+        'dịch thuật': 'traducción',
+        'và': 'y',
+        'Có nghĩa là': 'Significa',
+        'nếu như': 'si',
+        'mà': 'que',
+        'bạn': 'tú',
+        'có': 'tienes',
+        'Hello': 'Hola',
+        'good': 'bueno',
+        'afternoon': 'tarde',
+      },
+      'vi_fr': {
+        'Xin chào': 'Bonjour',
+        'tôi tên là': 'je m\'appelle',
+        'tôi là': 'je suis',
+        'đến từ': 'de',
+        'Việt Nam': 'Vietnam',
+        'hôm nay': 'aujourd\'hui',
+        'tôi muốn': 'je veux',
+        'test': 'test',
+        'hệ thống': 'système',
+        'dịch thuật': 'traduction',
+        'và': 'et',
+        'Có nghĩa là': 'Cela signifie',
+        'nếu như': 'si',
+        'mà': 'que',
+        'bạn': 'vous',
+        'có': 'avez',
+        'Hello': 'Bonjour',
+        'good': 'bon',
+        'afternoon': 'après-midi',
+      },
+      
+      // ENGLISH TO OTHER LANGUAGES
       'en_vi': {
         'Hello': 'Xin chào',
         'my name is': 'tôi tên là',
@@ -510,6 +643,107 @@ class CentralTranslationService extends ChangeNotifier {
         'system': 'hệ thống',
         'translation': 'dịch thuật',
         'and': 'và',
+        'It means': 'Có nghĩa là',
+        'if': 'nếu như',
+        'that': 'mà',
+        'you': 'bạn',
+        'have': 'có',
+        'good': 'tốt',
+        'afternoon': 'buổi chiều',
+      },
+      'en_es': {
+        'Hello': 'Hola',
+        'my name is': 'mi nombre es',
+        'I am': 'soy',
+        'from': 'de',
+        'Vietnam': 'Vietnam',
+        'today': 'hoy',
+        'I want to': 'quiero',
+        'test': 'prueba',
+        'system': 'sistema',
+        'translation': 'traducción',
+        'and': 'y',
+        'It means': 'Significa',
+        'if': 'si',
+        'that': 'que',
+        'you': 'tú',
+        'have': 'tienes',
+        'good': 'bueno',
+        'afternoon': 'tarde',
+      },
+      'en_fr': {
+        'Hello': 'Bonjour',
+        'my name is': 'je m\'appelle',
+        'I am': 'je suis',
+        'from': 'de',
+        'Vietnam': 'Vietnam',
+        'today': 'aujourd\'hui',
+        'I want to': 'je veux',
+        'test': 'test',
+        'system': 'système',
+        'translation': 'traduction',
+        'and': 'et',
+        'It means': 'Cela signifie',
+        'if': 'si',
+        'that': 'que',
+        'you': 'vous',
+        'have': 'avez',
+        'good': 'bon',
+        'afternoon': 'après-midi',
+      },
+      
+      // REVERSE TRANSLATIONS
+      'es_vi': {
+        'Hola': 'Xin chào',
+        'mi nombre es': 'tôi tên là',
+        'soy': 'tôi là',
+        'de': 'đến từ',
+        'Vietnam': 'Việt Nam',
+        'hoy': 'hôm nay',
+        'quiero': 'tôi muốn',
+        'prueba': 'test',
+        'sistema': 'hệ thống',
+        'traducción': 'dịch thuật',
+        'y': 'và',
+      },
+      'fr_vi': {
+        'Bonjour': 'Xin chào',
+        'je m\'appelle': 'tôi tên là',
+        'je suis': 'tôi là',
+        'de': 'đến từ',
+        'Vietnam': 'Việt Nam',
+        'aujourd\'hui': 'hôm nay',
+        'je veux': 'tôi muốn',
+        'test': 'test',
+        'système': 'hệ thống',
+        'traduction': 'dịch thuật',
+        'et': 'và',
+      },
+      'es_en': {
+        'Hola': 'Hello',
+        'mi nombre es': 'my name is',
+        'soy': 'I am',
+        'de': 'from',
+        'Vietnam': 'Vietnam',
+        'hoy': 'today',
+        'quiero': 'I want to',
+        'prueba': 'test',
+        'sistema': 'system',
+        'traducción': 'translation',
+        'y': 'and',
+      },
+      'fr_en': {
+        'Bonjour': 'Hello',
+        'je m\'appelle': 'my name is',
+        'je suis': 'I am',
+        'de': 'from',
+        'Vietnam': 'Vietnam',
+        'aujourd\'hui': 'today',
+        'je veux': 'I want to',
+        'test': 'test',
+        'système': 'system',
+        'traduction': 'translation',
+        'et': 'and',
       },
     };
 
@@ -524,10 +758,20 @@ class CentralTranslationService extends ChangeNotifier {
               (match) => entry.value,
         );
       }
+      
+      if (kDebugMode) {
+        print('✅ Enhanced mock translation ($fromLang -> $toLang): "$text" → "$result"');
+      }
+      
       return result;
     }
 
-    return '[$toLang] $text';
+    // Nếu không có bản dịch mock, trả về text gốc thay vì format [lang]
+    if (kDebugMode) {
+      print('⚠️ No mock translation for $fromLang -> $toLang, returning original text');
+    }
+    
+    return text; // ✅ TRẢ VỀ TEXT GỐC THAY VÌ [es] text
   }
 
   Future<void> _saveCentralTranslation(CentralTranslationResult result) async {
@@ -681,6 +925,9 @@ class CentralTranslationService extends ChangeNotifier {
 
     // Dispose Google Speech Service
     _googleSpeechService?.dispose();
+
+    // Dispose Google Cloud Translation Service
+    _googleCloudTranslation?.dispose();
 
     // Close additional translators
     for (final translator in _translators.values) {

@@ -170,7 +170,8 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
     try {
       _setupSupportedLanguages();
 
-      final commonLanguages = ['en', 'vi', 'zh', 'ja', 'ko', 'th'];
+      // ✅ THÊM SPANISH VÀ FRENCH VÀO DANH SÁCH NGÔN NGỮ CHÍNH
+      final commonLanguages = ['en', 'vi', 'zh', 'ja', 'ko', 'th', 'es', 'fr'];
       int createdTranslators = 0;
 
       for (String fromLang in commonLanguages) {
@@ -204,6 +205,7 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
         print('✅ IMPROVED MLKit Translation initialized');
         print('   🔧 Created translators: $createdTranslators');
         print('   🌐 Language pairs: ${commonLanguages.length}x${commonLanguages.length}');
+        print('   ✅ Added Spanish (es) and French (fr) support');
       }
     } catch (e) {
       if (kDebugMode) {
@@ -859,9 +861,9 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
     }
   }
 
-  // 🎭 IMPROVED MOCK TRANSLATION
+  // 🎭 IMPROVED MOCK TRANSLATION (bao gồm Spanish và French)
   String _getImprovedMockTranslation(String text, String fromLang, String toLang) {
-    // Enhanced mock translations with more phrases
+    // ✅ THÊM SPANISH VÀ FRENCH MOCK TRANSLATIONS
     const improvedMockTranslations = {
       'vi_en': {
         'Xin chào': 'Hello',
@@ -885,6 +887,50 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
         'dài': 'long',
         'mọi người': 'everyone',
         'đang': 'am',
+      },
+      'vi_es': {
+        'Xin chào': 'Hola',
+        'tôi tên là': 'mi nombre es',
+        'tôi là': 'soy',
+        'đến từ': 'de',
+        'Việt Nam': 'Vietnam',
+        'hôm nay': 'hoy',
+        'tôi muốn': 'quiero',
+        'test': 'prueba',
+        'hệ thống': 'sistema',
+        'dịch thuật': 'traducción',
+        'này': 'esto',
+        'và': 'y',
+        'hy vọng': 'espero',
+        'rằng': 'que',
+        'hoạt động': 'funciona',
+        'tốt': 'bien',
+        'với': 'con',
+        'câu': 'oración',
+        'dài': 'largo',
+        'mọi người': 'todos',
+      },
+      'vi_fr': {
+        'Xin chào': 'Bonjour',
+        'tôi tên là': 'je m\'appelle',
+        'tôi là': 'je suis',
+        'đến từ': 'de',
+        'Việt Nam': 'Vietnam',
+        'hôm nay': 'aujourd\'hui',
+        'tôi muốn': 'je veux',
+        'test': 'test',
+        'hệ thống': 'système',
+        'dịch thuật': 'traduction',
+        'này': 'ceci',
+        'và': 'et',
+        'hy vọng': 'j\'espère',
+        'rằng': 'que',
+        'hoạt động': 'fonctionne',
+        'tốt': 'bien',
+        'với': 'avec',
+        'câu': 'phrase',
+        'dài': 'long',
+        'mọi người': 'tout le monde',
       },
       'en_vi': {
         'Hello': 'Xin chào',
@@ -911,6 +957,38 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
         'We': 'Chúng ta',
         'lay': 'nằm',
         'down': 'xuống',
+      },
+      'en_es': {
+        'Hello': 'Hola',
+        'my name is': 'mi nombre es',
+        'I am': 'soy',
+        'from': 'de',
+        'Vietnam': 'Vietnam',
+        'today': 'hoy',
+        'I want to': 'quiero',
+        'test': 'prueba',
+        'system': 'sistema',
+        'translation': 'traducción',
+        'and': 'y',
+        'We': 'Nosotros',
+        'lay': 'acostarse',
+        'down': 'abajo',
+      },
+      'en_fr': {
+        'Hello': 'Bonjour',
+        'my name is': 'je m\'appelle',
+        'I am': 'je suis',
+        'from': 'de',
+        'Vietnam': 'Vietnam',
+        'today': 'aujourd\'hui',
+        'I want to': 'je veux',
+        'test': 'test',
+        'system': 'système',
+        'translation': 'traduction',
+        'and': 'et',
+        'We': 'Nous',
+        'lay': 'allonger',
+        'down': 'bas',
       },
       'en_ja': {
         'Hello': 'こんにちは',
@@ -973,14 +1051,18 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
       }
 
       if (kDebugMode) {
-        print('🎭 IMPROVED mock translation: "$text" → "$result"');
+        print('🎭 IMPROVED mock translation ($fromLang -> $toLang): "$text" → "$result"');
       }
 
       return result;
     }
 
-    // Fallback
-    return '[$toLang] $text';
+    // ✅ FALLBACK: Trả về text gốc thay vì [lang] format
+    if (kDebugMode) {
+      print('⚠️ No mock translation for $fromLang -> $toLang, returning original text');
+    }
+    
+    return text; // ✅ TRẢ VỀ TEXT GỐC THAY VÌ [$toLang] $text
   }
 
   // 🛑 IMPROVED STOP LISTENING

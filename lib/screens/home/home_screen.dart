@@ -1,14 +1,12 @@
-// lib/screens/home/home_screen.dart - COMPLETE FIXED VERSION
+// lib/screens/home/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:globecast_ui/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import '../../router/app_router.dart';
 import '../../services/auth_service.dart';
 
-import '../test/test_screen.dart';
-
-class EnhancedHomeScreen extends StatelessWidget {
-  const EnhancedHomeScreen({super.key});
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -36,11 +34,6 @@ class EnhancedHomeScreen extends StatelessWidget {
 
                         // Quick Actions
                         _buildQuickActions(context),
-
-                        const SizedBox(height: 32),
-
-                        // Speech Translation Test Section
-                        _buildSpeechTestSection(context),
 
                         const SizedBox(height: 32),
 
@@ -84,7 +77,7 @@ class EnhancedHomeScreen extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: GcbAppTheme.primary,
+                  color: Colors.blue,
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: const Icon(
@@ -94,25 +87,13 @@ class EnhancedHomeScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'GlobeCast V2',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    'Google Speech + MLKit',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
+              const Text(
+                'GlobeCast',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -180,10 +161,10 @@ class EnhancedHomeScreen extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: GcbAppTheme.primary.withOpacity(0.1),
+          color: Colors.blue.withOpacity(0.1),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: GcbAppTheme.primary.withOpacity(0.3),
+            color: Colors.blue.withOpacity(0.3),
           ),
         ),
         child: Row(
@@ -191,7 +172,7 @@ class EnhancedHomeScreen extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 12,
-              backgroundColor: GcbAppTheme.primary,
+              backgroundColor: Colors.blue,
               child: Text(
                 (authService.displayName?.isNotEmpty == true)
                     ? authService.displayName![0].toUpperCase()
@@ -209,7 +190,7 @@ class EnhancedHomeScreen extends StatelessWidget {
             Text(
               authService.displayName ?? 'User',
               style: const TextStyle(
-                color: GcbAppTheme.primary,
+                color: Colors.blue,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
@@ -217,7 +198,7 @@ class EnhancedHomeScreen extends StatelessWidget {
             const SizedBox(width: 4),
             const Icon(
               Icons.keyboard_arrow_down,
-              color: GcbAppTheme.primary,
+              color: Colors.blue,
               size: 16,
             ),
           ],
@@ -234,7 +215,7 @@ class EnhancedHomeScreen extends StatelessWidget {
           child: const Text(
             'Sign In',
             style: TextStyle(
-              color: GcbAppTheme.primary,
+              color: Colors.blue,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),
@@ -244,7 +225,7 @@ class EnhancedHomeScreen extends StatelessWidget {
         ElevatedButton(
           onPressed: () => Navigator.pushNamed(context, Routes.signUp),
           style: ElevatedButton.styleFrom(
-            backgroundColor: GcbAppTheme.primary,
+            backgroundColor: Colors.blue,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             minimumSize: Size.zero,
             shape: RoundedRectangleBorder(
@@ -271,7 +252,7 @@ class EnhancedHomeScreen extends StatelessWidget {
         Text(
           authService.isAuthenticated
               ? 'Welcome back, ${authService.displayName?.split(' ').first ?? 'User'}!'
-              : 'Welcome to GlobeCast V2',
+              : 'Welcome to GlobeCast',
           style: const TextStyle(
             color: Colors.white,
             fontSize: 28,
@@ -281,8 +262,8 @@ class EnhancedHomeScreen extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           authService.isAuthenticated
-              ? 'Ready to connect with real-time translation?'
-              : 'Google Speech + MLKit powered real-time translation',
+              ? 'Ready to connect globally?'
+              : 'Connect and communicate across languages',
           style: TextStyle(
             color: Colors.grey[400],
             fontSize: 16,
@@ -311,10 +292,10 @@ class EnhancedHomeScreen extends StatelessWidget {
             Expanded(
               child: _buildActionCard(
                 context: context,
-                icon: Icons.video_call,
+                icon: Icons.group,
                 title: 'Join Meeting',
                 subtitle: 'Enter meeting code',
-                color: GcbAppTheme.primary,
+                color: Colors.blue,
                 onTap: () => Navigator.pushNamed(context, Routes.joinMeeting),
               ),
             ),
@@ -322,7 +303,7 @@ class EnhancedHomeScreen extends StatelessWidget {
             Expanded(
               child: _buildActionCard(
                 context: context,
-                icon: Icons.add_circle,
+                icon: Icons.video_call,
                 title: 'Create Meeting',
                 subtitle: 'Start new meeting',
                 color: Colors.green,
@@ -330,6 +311,18 @@ class EnhancedHomeScreen extends StatelessWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 16),
+        _buildActionButton(
+          context: context,
+          icon: Icons.calendar_today,
+          label: 'Schedule Meeting',
+          color: Colors.transparent,
+          borderColor: Colors.blue,
+          textColor: Colors.blue,
+          onPressed: () {
+            _showComingSoonDialog(context, 'Schedule Meeting');
+          },
         ),
       ],
     );
@@ -394,155 +387,45 @@ class EnhancedHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSpeechTestSection(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Speech Translation Testing',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
+  Widget _buildActionButton({
+    required BuildContext context,
+    required IconData icon,
+    required String label,
+    required Color color,
+    Color? borderColor,
+    Color? textColor,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          side: borderColor != null ? BorderSide(color: borderColor) : null,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
           ),
         ),
-        const SizedBox(height: 16),
-
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: GcbAppTheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: Colors.green.withOpacity(0.3),
-              width: 2,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: textColor ?? Colors.white,
             ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.science,
-                      color: Colors.green,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Google Speech + MLKit Test',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          'Test real-time speech recognition and translation',
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: textColor ?? Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
               ),
-
-              const SizedBox(height: 16),
-
-              // Features list
-              _buildFeatureRow('🎤', 'Google Cloud Speech-to-Text'),
-              _buildFeatureRow('🌐', 'MLKit On-device Translation'),
-              _buildFeatureRow('🔄', 'Real-time Processing'),
-              _buildFeatureRow('📱', 'Multi-language Support'),
-
-              const SizedBox(height: 16),
-
-              // Test button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const SpeechTranslationTestScreen(),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.play_arrow, size: 20),
-                  label: const Text('Test Speech Translation'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // Info note
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info, color: Colors.blue, size: 16),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Uses Google Speech API with your credentials and MLKit for on-device translation',
-                        style: TextStyle(
-                          color: Colors.blue,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ],
-    );
-  }
-
-  Widget _buildFeatureRow(String emoji, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Text(emoji, style: const TextStyle(fontSize: 16)),
-          const SizedBox(width: 8),
-          Text(
-            text,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -555,7 +438,7 @@ class EnhancedHomeScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text(
-              'Recent Meetings',
+              'My Meetings',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 20,
@@ -567,7 +450,7 @@ class EnhancedHomeScreen extends StatelessWidget {
               child: const Text(
                 'View All',
                 style: TextStyle(
-                  color: GcbAppTheme.primary,
+                  color: Colors.blue,
                   fontSize: 14,
                 ),
               ),
@@ -579,20 +462,30 @@ class EnhancedHomeScreen extends StatelessWidget {
         // Recent meetings list
         _buildMeetingCard(
           context: context,
-          title: 'Team Weekly Standup',
-          meetingId: 'GCM-123-456',
+          title: 'Weekly Team Standup',
+          meetingId: 'GCM-123-456-789',
           time: 'Today, 2:00 PM',
-          participants: 5,
-          isActive: true,
+          onJoin: () {
+            Navigator.pushNamed(
+                context,
+                Routes.meeting,
+                arguments: {'code': 'GCM-123-456-789'}
+            );
+          },
         ),
         const SizedBox(height: 12),
         _buildMeetingCard(
           context: context,
-          title: 'Global Project Review',
-          meetingId: 'GCM-789-012',
+          title: 'Project Kickoff',
+          meetingId: 'GCM-987-654-321',
           time: 'Tomorrow, 10:00 AM',
-          participants: 8,
-          isActive: false,
+          onJoin: () {
+            Navigator.pushNamed(
+                context,
+                Routes.meeting,
+                arguments: {'code': 'GCM-987-654-321'}
+            );
+          },
         ),
       ],
     );
@@ -603,111 +496,84 @@ class EnhancedHomeScreen extends StatelessWidget {
     required String title,
     required String meetingId,
     required String time,
-    required int participants,
-    required bool isActive,
+    required VoidCallback onJoin,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: GcbAppTheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isActive ? Colors.green.withOpacity(0.3) : Colors.grey[700]!,
-          width: 1,
-        ),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isActive
-                  ? Colors.green.withOpacity(0.2)
-                  : Colors.blue.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              Icons.videocam,
-              color: isActive ? Colors.green : Colors.blue,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  meetingId,
-                  style: TextStyle(
-                    color: Colors.grey[400],
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Text(
-                      time,
-                      style: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.people,
-                      color: Colors.grey[500],
-                      size: 12,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '$participants',
-                      style: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (isActive)
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              width: 48,
+              height: 48,
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(12),
+                color: Colors.blue.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.videocam,
+                color: Colors.blue,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    meetingId,
+                    style: TextStyle(
+                      color: Colors.grey[400],
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    time,
+                    style: TextStyle(
+                      color: Colors.grey[500],
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ElevatedButton(
+              onPressed: onJoin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
               ),
               child: const Text(
-                'LIVE',
+                'Join',
                 style: TextStyle(
-                  color: Colors.green,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
-          const SizedBox(width: 8),
-          IconButton(
-            onPressed: () => _showComingSoonDialog(context, 'Join Meeting'),
-            icon: const Icon(
-              Icons.play_arrow,
-              color: GcbAppTheme.primary,
-              size: 20,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -717,7 +583,7 @@ class EnhancedHomeScreen extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Why Choose GlobeCast V2?',
+          'Why Choose GlobeCast?',
           style: TextStyle(
             color: Colors.white,
             fontSize: 20,
@@ -729,52 +595,70 @@ class EnhancedHomeScreen extends StatelessWidget {
         _buildFeatureItem(
           icon: Icons.translate,
           title: 'Real-time Translation',
-          description: 'Google Speech + MLKit for accurate live translation',
+          description: 'Communicate across languages seamlessly',
           color: Colors.blue,
         ),
         const SizedBox(height: 12),
         _buildFeatureItem(
           icon: Icons.cloud,
-          title: 'Powered by Google Cloud AI',
-          description: 'High accuracy speech recognition with Google Speech API',
+          title: 'Cloud-powered',
+          description: 'High-quality video calls with global reach',
           color: Colors.green,
         ),
         const SizedBox(height: 12),
         _buildFeatureItem(
-          icon: Icons.phone_android,
-          title: 'On-device Translation',
-          description: 'MLKit translation works offline for privacy and speed',
+          icon: Icons.security,
+          title: 'Secure & Private',
+          description: 'End-to-end encrypted communications',
           color: Colors.purple,
         ),
         const SizedBox(height: 12),
         _buildFeatureItem(
           icon: Icons.group,
           title: 'Global Collaboration',
-          description: 'Connect with people worldwide without language barriers',
+          description: 'Connect with people worldwide',
           color: Colors.orange,
         ),
 
         const SizedBox(height: 24),
 
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () => Navigator.pushNamed(context, Routes.signUp),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: GcbAppTheme.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        // Center the content for guests
+        Center(
+          child: Column(
+            children: [
+              Icon(
+                Icons.account_circle_outlined,
+                size: 80,
+                color: Colors.grey[600],
               ),
-            ),
-            child: const Text(
-              'Get Started - Sign Up Free',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
+              const SizedBox(height: 16),
+              Text(
+                'Sign in to access your meetings',
+                style: TextStyle(
+                  color: Colors.grey[400],
+                  fontSize: 16,
+                ),
               ),
-            ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () => Navigator.pushNamed(context, Routes.signIn),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Sign In Now',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -876,7 +760,7 @@ class EnhancedHomeScreen extends StatelessWidget {
             onPressed: () => Navigator.of(context).pop(),
             child: const Text(
               'OK',
-              style: TextStyle(color: GcbAppTheme.primary),
+              style: TextStyle(color: Colors.blue),
             ),
           ),
         ],
