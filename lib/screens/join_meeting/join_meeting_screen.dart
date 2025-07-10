@@ -89,7 +89,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'Join Translation Meeting',
+          'Join Meeting',
           style: TextStyle(color: Colors.white),
         ),
       ),
@@ -111,22 +111,13 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                 const Text(
                   'Real-time Translation Meeting',
                   style: TextStyle(
-                    fontSize: 24,
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                   ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Join a meeting with instant Google Cloud translation',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[400],
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
 
                 // Meeting Code Input
                 _buildInputSection(
@@ -216,7 +207,7 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
-                              Icons.language,
+                              Icons.public,
                               color: GcbAppTheme.primary,
                               size: 20,
                             ),
@@ -267,15 +258,15 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
+                            const Row(
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.info_outline,
                                   color: Colors.blue,
                                   size: 16,
                                 ),
-                                const SizedBox(width: 8),
-                                const Text(
+                                SizedBox(width: 8),
+                                Text(
                                   'How it works:',
                                   style: TextStyle(
                                     color: Colors.blue,
@@ -289,7 +280,6 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                             _buildExplanationItem('🎤 You speak ${_getLanguageName(_selectedLanguage)}'),
                             _buildExplanationItem('🌐 Everyone hears real-time translation to their language'),
                             _buildExplanationItem('👂 You see all conversations in ${_getLanguageName(_selectedLanguage)}'),
-                            _buildExplanationItem('⚡ Powered by Google Cloud AI'),
                           ],
                         ),
                       ),
@@ -355,15 +345,15 @@ class _EnhancedJoinMeetingScreenState extends State<EnhancedJoinMeetingScreen> {
                   ),
                   child: Column(
                     children: [
-                      Row(
+                      const Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.check_circle,
                             color: Colors.green,
                             size: 16,
                           ),
-                          const SizedBox(width: 12),
-                          const Expanded(
+                          SizedBox(width: 12),
+                          Expanded(
                             child: Text(
                               'Translation Features',
                               style: TextStyle(

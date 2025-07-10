@@ -81,7 +81,7 @@ class HomeScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: const Icon(
-                  Icons.language,
+                  Icons.public,
                   size: 20,
                   color: Colors.white,
                 ),

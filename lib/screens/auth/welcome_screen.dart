@@ -27,8 +27,8 @@ class WelcomeScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(60),
                 ),
                 child: const Icon(
-                  Icons.language,
-                  size: 60,
+                  Icons.public,
+                  size: 100,
                   color: Colors.white,
                 ),
               ),
@@ -49,7 +49,7 @@ class WelcomeScreen extends StatelessWidget {
 
               // Subtitle
               Text(
-                'Workplace',
+                'Global Meetings',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w300,

@@ -109,7 +109,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 const SizedBox(height: 8),
 
                 Text(
-                  'Join GlobeCast WebRTC mesh network',
+                  'Talk to the world with GlobeCast',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: Colors.grey[400],
                   ),

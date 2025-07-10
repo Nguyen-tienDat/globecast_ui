@@ -109,7 +109,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
-          'Create Translation Meeting',
+          'Create Meeting',
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w500,
@@ -123,16 +123,16 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Header
-              Center(
+              const Center(
                 child: Column(
                   children: [
-                    const Icon(
-                      Icons.add_circle,
+                    Icon(
+                      Icons.public_sharp,
                       size: 64,
                       color: GcbAppTheme.primary,
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
+                    SizedBox(height: 16),
+                    Text(
                       'Real-time Translation Meeting',
                       style: TextStyle(
                         fontSize: 24,
@@ -141,15 +141,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                       ),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Create a meeting with instant Google Cloud translation',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[400],
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
+                    SizedBox(height: 8),
                   ],
                 ),
               ),
@@ -276,15 +268,15 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          const Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.info_outline,
                                 color: Colors.blue,
                                 size: 16,
                               ),
-                              const SizedBox(width: 8),
-                              const Text(
+                              SizedBox(width: 8),
+                              Text(
                                 'How it works:',
                                 style: TextStyle(
                                   color: Colors.blue,
@@ -298,7 +290,6 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                           _buildExplanationItem('🎤 You speak ${_languages[_selectedLanguage]?.split(' ').last}'),
                           _buildExplanationItem('👥 Others hear real-time translation to ${_languages[_selectedLanguage]?.split(' ').last}'),
                           _buildExplanationItem('🌐 You see all conversations translated to ${_languages[_selectedLanguage]?.split(' ').last}'),
-                          _buildExplanationItem('⚡ Powered by Google Cloud AI'),
                         ],
                       ),
                     ),
@@ -315,7 +306,7 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _createMeeting,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
+                    backgroundColor: Colors.blue,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -366,15 +357,15 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                 ),
                 child: Column(
                   children: [
-                    Row(
+                    const Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.check_circle,
                           color: Colors.green,
                           size: 16,
                         ),
-                        const SizedBox(width: 12),
-                        const Expanded(
+                        SizedBox(width: 12),
+                        Expanded(
                           child: Text(
                             'Meeting Features',
                             style: TextStyle(
@@ -389,7 +380,6 @@ class _EnhancedCreateMeetingScreenState extends State<EnhancedCreateMeetingScree
                     const SizedBox(height: 8),
                     _buildFeatureItem('🔥 Real-time speech translation'),
                     _buildFeatureItem('☁️ Google Cloud Speech-to-Text'),
-                    _buildFeatureItem('👥 Up to 6 participants'),
                     _buildFeatureItem('🎯 Auto language detection'),
                     _buildFeatureItem('📱 Works on all devices'),
                   ],

@@ -81,7 +81,7 @@ class GlobeCastApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
-        title: 'GlobeCast - Real-time Translation',
+        title: 'GlobeCast - Globalize Your Connection',
         theme: GcbAppTheme.darkTheme,
         debugShowCheckedModeBanner: false,
 
