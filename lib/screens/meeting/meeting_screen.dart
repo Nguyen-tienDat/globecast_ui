@@ -10,6 +10,7 @@ import 'package:globecast_ui/services/webrtc_mesh_meeting_service.dart';
 import 'package:globecast_ui/services/central_translation_service.dart';
 
 import '../../services/google_speech_translation_service.dart';
+import 'widgets/chat_panel.dart';
 
 class MeetingScreen extends StatefulWidget {
   final String? code;
@@ -32,7 +33,7 @@ class MeetingScreen extends StatefulWidget {
 class _MeetingScreenState extends State<MeetingScreen> {
   // 🎯 STATE MANAGEMENT
   bool _isJoining = false;
-  bool _isListening = false;
+  final bool _isListening = false;
   bool _isTranslating = false;
   bool _isHubInitialized = false;
 
@@ -44,13 +45,14 @@ class _MeetingScreenState extends State<MeetingScreen> {
   // 🎯 UI STATE
   bool _showTranslationOverlay = true;
   bool _showLanguageSettings = false;
+  bool _showChatPanel = false;
   int _totalTranslations = 0;
 
   // 🌐 LANGUAGE SETTINGS - CENTRAL HUB APPROACH
   String _mySpeakingLanguage = '';    // What I speak
   String _myDisplayLanguage = '';     // What I want to see
   String _currentUserId = '';
-  List<String> _selectedOutputLanguages = ['en', 'vi', 'zh', 'ja', 'ko'];
+  final List<String> _selectedOutputLanguages = ['en', 'vi', 'zh', 'ja', 'ko'];
   final List<String> _supportedLanguages = [
     'vi', 'en', 'zh', 'ja', 'ko', 'th', 'es', 'fr', 'de'
   ];
@@ -107,35 +109,44 @@ class _MeetingScreenState extends State<MeetingScreen> {
   Future<void> _loadUserLanguagePreferences() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
+
       // Load saved language preferences
       final savedSpeakingLanguage = prefs.getString('speaking_language');
       final savedDisplayLanguage = prefs.getString('display_language');
 
       setState(() {
-        // ✅ USE SAVED PREFERENCES IF AVAILABLE
-        if (savedSpeakingLanguage != null && savedSpeakingLanguage.isNotEmpty) {
-          _mySpeakingLanguage = savedSpeakingLanguage;
-        } else {
-          // Default fallback only if no saved preference
-          _mySpeakingLanguage = 'vi'; // Default to Vietnamese
-        }
+        // ✅ ƯU TIÊN widget.targetLanguage TRƯỚC
+        if (widget.targetLanguage != null && widget.targetLanguage!.isNotEmpty) {
+          // Khi có targetLanguage từ Create Meeting screen
+          _mySpeakingLanguage = widget.targetLanguage!;
+          _myDisplayLanguage = widget.targetLanguage!; // ✅ KEY FIX: Dùng targetLanguage làm display language
 
-        if (savedDisplayLanguage != null && savedDisplayLanguage.isNotEmpty) {
-          _myDisplayLanguage = savedDisplayLanguage;
-        } else if (widget.targetLanguage != null) {
-          // Use widget parameter as fallback
-          _myDisplayLanguage = widget.targetLanguage!;
+          if (kDebugMode) {
+            print('🎯 Using widget.targetLanguage: ${widget.targetLanguage}');
+            print('   Speaking: $_mySpeakingLanguage');
+            print('   Display: $_myDisplayLanguage');
+          }
+        } else if (savedSpeakingLanguage != null && savedSpeakingLanguage.isNotEmpty) {
+          _mySpeakingLanguage = savedSpeakingLanguage;
+          _myDisplayLanguage = savedDisplayLanguage ?? savedSpeakingLanguage;
         } else {
-          // Final fallback
-          _myDisplayLanguage = 'en'; // Default to English
+          // Fallback cuối cùng
+          _mySpeakingLanguage = 'vi';
+          _myDisplayLanguage = 'en';
         }
       });
 
+      // ✅ LƯU NGAY VÀO SHARED PREFERENCES
+      if (widget.targetLanguage != null && widget.targetLanguage!.isNotEmpty) {
+        await prefs.setString('speaking_language', widget.targetLanguage!);
+        await prefs.setString('display_language', widget.targetLanguage!);
+      }
+
       if (kDebugMode) {
-        print('🌐 FIXED: Loaded user language preferences:');
-        print('   Speaking: $_mySpeakingLanguage (from: ${savedSpeakingLanguage != null ? "SharedPreferences" : "default"})');
-        print('   Display: $_myDisplayLanguage (from: ${savedDisplayLanguage != null ? "SharedPreferences" : widget.targetLanguage != null ? "widget" : "default"})');
+        print('🌐 Final language setup:');
+        print('   Speaking: $_mySpeakingLanguage');
+        print('   Display: $_myDisplayLanguage');
+        print('   Widget targetLanguage: ${widget.targetLanguage}');
       }
 
       // Initialize meeting after loading preferences
@@ -145,11 +156,11 @@ class _MeetingScreenState extends State<MeetingScreen> {
       if (kDebugMode) {
         print('❌ Error loading language preferences: $e');
       }
-      
-      // Fallback to defaults if loading fails
+
+      // Fallback to widget.targetLanguage if error
       setState(() {
-        _mySpeakingLanguage = 'vi';
-        _myDisplayLanguage = widget.targetLanguage ?? 'en';
+        _mySpeakingLanguage = widget.targetLanguage ?? 'vi';
+        _myDisplayLanguage = widget.targetLanguage ?? 'en'; // ✅ KEY FIX
       });
 
       // Still initialize meeting
@@ -237,7 +248,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
       _isHubInitialized = true;
 
       setState(() {
-        _hubStatus = '✅ Central Translation Hub ready - Speak in any language!';
+        _hubStatus = '✅ Global Mode ready - Speak in any language!';
       });
 
       if (mounted) {
@@ -245,9 +256,9 @@ class _MeetingScreenState extends State<MeetingScreen> {
           const SnackBar(
             content: Row(
               children: [
-                Icon(Icons.hub, color: Colors.white, size: 16),
+                Icon(Icons.language, color: Colors.white, size: 16),
                 SizedBox(width: 8),
-                Text('🌐 Central Translation Hub ready!'),
+                Text('🌐 Global Mode ready!'),
               ],
             ),
             backgroundColor: Colors.green,
@@ -463,6 +474,8 @@ class _MeetingScreenState extends State<MeetingScreen> {
               ),
               if (_showLanguageSettings)
                 _buildLanguageSettingsPanel(),
+              if (_showChatPanel)
+                _buildChatPanel(),
             ],
           );
         },
@@ -496,7 +509,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
-                    Icons.hub,
+                    Icons.language,
                     color: Colors.blue,
                     size: 40,
                   ),
@@ -505,7 +518,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
             ),
             const SizedBox(height: 32),
             const Text(
-              'Meeting with Central Translation Hub',
+              'Meeting with Global Mode',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 24,
@@ -611,10 +624,10 @@ class _MeetingScreenState extends State<MeetingScreen> {
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.hub, color: Colors.white, size: 10),
+                    Icon(Icons.language, color: Colors.white, size: 10),
                     SizedBox(width: 4),
                     Text(
-                      'Hub',
+                      'Global Mode',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 9,
@@ -892,7 +905,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   color: Colors.blue.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.hub, color: Colors.blue, size: 20),
+                child: const Icon(Icons.language, color: Colors.blue, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -900,7 +913,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Central Translation Hub',
+                      'Global Mode',
                       style: TextStyle(
                         color: Colors.blue,
                         fontSize: 16,
@@ -1011,15 +1024,15 @@ class _MeetingScreenState extends State<MeetingScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            _isTranslating ? Icons.hub : Icons.hub_outlined,
+            _isTranslating ? Icons.language : Icons.track_changes_outlined,
             size: 32,
             color: Colors.grey[600],
           ),
           const SizedBox(height: 12),
           Text(
             _isTranslating
-                ? '🎤 Listening for speech...\nCentral Hub active for all participants'
-                : 'Central Translation Hub ready\nTap "Start Hub Translation" to begin',
+                ? '🎤 Listening for speech...\nGlobal active for all participants'
+                : 'Global Hub ready\nTap "Start" to begin',
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.grey, fontSize: 13),
           ),
@@ -1116,7 +1129,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                     ),
                   ],
                   const Spacer(),
-                  const Icon(Icons.hub, color: Colors.purple, size: 12),
+                  const Icon(Icons.language, color: Colors.purple, size: 12),
                 ],
               ),
 
@@ -1195,14 +1208,14 @@ class _MeetingScreenState extends State<MeetingScreen> {
     );
   }
 
-  // 🎯 ENHANCED BOTTOM CONTROLS
+  // 🎯 RESPONSIVE BOTTOM CONTROLS WITH CHAT
   Widget _buildEnhancedBottomControls(WebRTCMeshMeetingService service) {
     return Container(
       padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        bottom: MediaQuery.of(context).padding.bottom + 24,
-        top: 24,
+        left: 16,
+        right: 16,
+        bottom: MediaQuery.of(context).padding.bottom + 20,
+        top: 20,
       ),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1214,69 +1227,112 @@ class _MeetingScreenState extends State<MeetingScreen> {
           ],
         ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _buildEnhancedControlButton(
-            icon: service.isAudioEnabled ? Icons.mic : Icons.mic_off,
-            label: 'Mic',
-            isActive: service.isAudioEnabled,
-            onPressed: () async => await service.toggleAudio(),
-          ),
-          _buildEnhancedControlButton(
-            icon: service.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
-            label: 'Camera',
-            isActive: service.isVideoEnabled,
-            onPressed: () async => await service.toggleVideo(),
-          ),
-          _buildEnhancedControlButton(
-            icon: _isTranslating ? Icons.stop : Icons.hub,
-            label: _isTranslating ? 'Stop Hub' : 'Start Hub',
-            isActive: _isTranslating,
-            onPressed: _isHubInitialized
-                ? () async {
-              if (_isTranslating) {
-                await _stopCentralTranslation();
-              } else {
-                await _startCentralTranslation();
-              }
-            }
-                : null,
-          ),
-          _buildEnhancedControlButton(
-            icon: Icons.language,
-            label: 'Language',
-            onPressed: () {
-              setState(() {
-                _showLanguageSettings = !_showLanguageSettings;
-              });
-            },
-          ),
-          _buildEnhancedControlButton(
-            icon: Icons.history,
-            label: 'History',
-            onPressed: () => _showCentralTranslationHistory(),
-            badge: _translationResults.isNotEmpty ? _translationResults.length.toString() : null,
-          ),
-          _buildEnhancedControlButton(
-            icon: _showTranslationOverlay ? Icons.visibility : Icons.visibility_off,
-            label: 'Overlay',
-            isActive: _showTranslationOverlay,
-            onPressed: () {
-              setState(() {
-                _showTranslationOverlay = !_showTranslationOverlay;
-              });
-            },
-          ),
-          _buildEnhancedControlButton(
-            icon: Icons.call_end,
-            label: 'End Call',
-            isDestructive: true,
-            onPressed: () async => await _showEndCallDialog(service),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Responsive button layout
+          final screenWidth = constraints.maxWidth;
+          final buttonCount = 8; // Total number of buttons including chat
+          final minButtonWidth = 60.0;
+          final totalMinWidth = buttonCount * minButtonWidth;
+          
+          if (screenWidth < totalMinWidth) {
+            // Use horizontal scrolling for smaller screens
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: _buildControlButtons(service),
+              ),
+            );
+          } else {
+            // Use spaceEvenly for larger screens
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: _buildControlButtons(service),
+            );
+          }
+        },
       ),
     );
+  }
+
+  List<Widget> _buildControlButtons(WebRTCMeshMeetingService service) {
+    return [
+      _buildEnhancedControlButton(
+        icon: service.isAudioEnabled ? Icons.mic : Icons.mic_off,
+        label: 'Mic',
+        isActive: service.isAudioEnabled,
+        onPressed: () async => await service.toggleAudio(),
+      ),
+      _buildEnhancedControlButton(
+        icon: service.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
+        label: 'Camera',
+        isActive: service.isVideoEnabled,
+        onPressed: () async => await service.toggleVideo(),
+      ),
+      _buildEnhancedControlButton(
+        icon: _isTranslating ? Icons.stop : Icons.language,
+        label: _isTranslating ? 'Stop' : 'Start',
+        isActive: _isTranslating,
+        onPressed: _isHubInitialized
+            ? () async {
+          if (_isTranslating) {
+            await _stopCentralTranslation();
+          } else {
+            await _startCentralTranslation();
+          }
+        }
+            : null,
+      ),
+      _buildEnhancedControlButton(
+        icon: Icons.chat_bubble_outline,
+        label: 'Chat',
+        isActive: _showChatPanel,
+        onPressed: () {
+          setState(() {
+            _showChatPanel = !_showChatPanel;
+            // Close other panels when opening chat
+            if (_showChatPanel) {
+              _showLanguageSettings = false;
+            }
+          });
+        },
+      ),
+      _buildEnhancedControlButton(
+        icon: Icons.translate,
+        label: 'Language',
+        onPressed: () {
+          setState(() {
+            _showLanguageSettings = !_showLanguageSettings;
+            // Close other panels when opening language settings
+            if (_showLanguageSettings) {
+              _showChatPanel = false;
+            }
+          });
+        },
+      ),
+      _buildEnhancedControlButton(
+        icon: Icons.history,
+        label: 'History',
+        onPressed: () => _showCentralTranslationHistory(),
+        badge: _translationResults.isNotEmpty ? _translationResults.length.toString() : null,
+      ),
+      _buildEnhancedControlButton(
+        icon: _showTranslationOverlay ? Icons.visibility : Icons.visibility_off,
+        label: 'Overlay',
+        isActive: _showTranslationOverlay,
+        onPressed: () {
+          setState(() {
+            _showTranslationOverlay = !_showTranslationOverlay;
+          });
+        },
+      ),
+      _buildEnhancedControlButton(
+        icon: Icons.call_end,
+        label: 'End Call',
+        isDestructive: true,
+        onPressed: () async => await _showEndCallDialog(service),
+      ),
+    ];
   }
 
   Widget _buildEnhancedControlButton({
@@ -1441,6 +1497,35 @@ class _MeetingScreenState extends State<MeetingScreen> {
         _hubStatus = 'Error stopping: $e';
       });
     }
+  }
+
+  // 💬 CHAT PANEL
+  Widget _buildChatPanel() {
+    return Positioned(
+      top: 0,
+      bottom: 0,
+      right: 0,
+      width: MediaQuery.of(context).size.width * 0.8,
+      child: Container(
+        decoration: BoxDecoration(
+          color: GcbAppTheme.surface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 10,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: ChatPanel(
+            onToggleVisibility: () {
+              setState(() {
+                _showChatPanel = false; // Ẩn chat panel
+              });
+            },
+        ),
+      ),
+    );
   }
 
   // 🌐 LANGUAGE SETTINGS PANEL (unchanged)
@@ -1657,34 +1742,6 @@ class _MeetingScreenState extends State<MeetingScreen> {
                     ),
                     const SizedBox(height: 24),
                     // Sync Statistics
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: GcbAppTheme.surfaceLight,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Translation Sync Statistics',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          _buildStatItem('Total Messages', '$_totalTranslations'),
-                          const SizedBox(height: 8),
-                          _buildStatItem('Sync Status', _isListening ? 'Active' : 'Inactive'),
-                          const SizedBox(height: 8),
-                          _buildStatItem('Service', 'Google Cloud Speech'),
-                          const SizedBox(height: 8),
-                          _buildStatItem('Participants', 'Real-time sync enabled'),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -1719,6 +1776,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
   }
 
   // 📊 CENTRAL TRANSLATION HISTORY MODAL (unchanged)
+  // 📊 CENTRAL TRANSLATION HISTORY MODAL - FIXED
   void _showCentralTranslationHistory() {
     showModalBottomSheet(
       context: context,
@@ -1750,7 +1808,7 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text(
-                      'Central Translation Hub History',
+                      'Transcript/Translation History',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 20,
@@ -1785,8 +1843,166 @@ class _MeetingScreenState extends State<MeetingScreen> {
                   controller: scrollController,
                   itemCount: _translationResults.length,
                   itemBuilder: (context, index) {
-                    // ... same history item builder as before
-                    return Container(); // Placeholder
+                    final result = _translationResults[index];
+                    final isMyResult = result.speakerId == _currentUserId;
+                    final displayText = result.getDisplayText(_myDisplayLanguage);
+                    final isTranslated = displayText != result.originalText;
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isMyResult
+                            ? Colors.blue.withOpacity(0.1)
+                            : Colors.grey.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isTranslated
+                              ? Colors.green.withOpacity(0.6)
+                              : Colors.blue.withOpacity(0.4),
+                          width: isTranslated ? 2 : 1,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Speaker info with language indicators
+                          Row(
+                            children: [
+                              Icon(
+                                isMyResult ? Icons.account_circle : Icons.person,
+                                color: isMyResult ? Colors.blue : Colors.white,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                isMyResult ? 'You' : result.speakerName,
+                                style: TextStyle(
+                                  color: isMyResult ? Colors.blue : Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Speaking language
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(_languageFlags[result.detectedLanguage] ?? ''),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      result.detectedLanguage.toUpperCase(),
+                                      style: const TextStyle(color: Colors.blue, fontSize: 10),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // Translation indicator
+                              if (isTranslated) ...[
+                                const SizedBox(width: 4),
+                                const Icon(Icons.arrow_forward, color: Colors.green, size: 14),
+                                const SizedBox(width: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withOpacity(0.3),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(_languageFlags[_myDisplayLanguage] ?? ''),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _myDisplayLanguage.toUpperCase(),
+                                        style: const TextStyle(color: Colors.green, fontSize: 10),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              const Spacer(),
+                              const Icon(Icons.hub, color: Colors.purple, size: 14),
+                            ],
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          // Main text (personalized for each user)
+                          Text(
+                            displayText,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              height: 1.4,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+
+                          // Show original if translated
+                          if (isTranslated && !isMyResult) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Original (${result.detectedLanguage}):',
+                                    style: const TextStyle(color: Colors.grey, fontSize: 11),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    result.originalText,
+                                    style: const TextStyle(color: Colors.grey, fontSize: 13),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          const SizedBox(height: 8),
+
+                          // Metadata
+                          Row(
+                            children: [
+                              Text(
+                                'Confidence: ${(result.getConfidence(_myDisplayLanguage) * 100).toInt()}%',
+                                style: const TextStyle(color: Colors.grey, fontSize: 11),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                isTranslated ? 'Translated' : 'Original',
+                                style: TextStyle(
+                                  color: isTranslated ? Colors.green : Colors.grey,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Hub: ${result.allTranslations.length} langs',
+                                style: const TextStyle(color: Colors.purple, fontSize: 11),
+                              ),
+                              const Spacer(),
+                              Text(
+                                _formatTimestamp(result.timestamp),
+                                style: const TextStyle(color: Colors.grey, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
                   },
                 ),
               ),

@@ -161,10 +161,8 @@ class CentralTranslationService extends ChangeNotifier {
       await _initializeImprovedGoogleSpeech();
 
       // 2. Initialize Google Cloud Translation (reliable backup)
-      await _initializeGoogleCloudTranslation();
 
       // 3. Initialize MLKit Translation
-      await _initializeMLKitTranslation();
 
       // 4. Setup listeners
       _setupImprovedSpeechListeners();
@@ -374,7 +372,6 @@ class CentralTranslationService extends ChangeNotifier {
       print('   Meeting: $meetingId');
       print('   User: $userName ($userId)');
       print('   Speaking: $speakingLanguage → Display: $displayLanguage');
-      print('   🎙️ Google Speech Service updated');
     }
   }
 
@@ -485,11 +482,10 @@ class CentralTranslationService extends ChangeNotifier {
       _updateStatus('✅ Central Hub: ${speechResult.wordCount} words → ${allTranslations.length} languages');
 
       if (kDebugMode) {
-        print('✅ Central Hub translation completed:');
+        print('✅ Global Hub translation completed:');
         print('   📝 Original: "${speechResult.originalText}"');
         print('   📊 ${speechResult.wordCount} words, ${(speechResult.confidence * 100).toInt()}% confidence');
         print('   🌐 Available in: ${allTranslations.length} languages');
-        print('   🎯 From Improved Google Speech + MLKit enhancement');
         print('   📈 Session: $_successfulTranslations/$_totalTranslations successful');
       }
 

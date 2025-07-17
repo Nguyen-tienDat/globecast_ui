@@ -9,6 +9,7 @@ import 'services/auth_service.dart';
 import 'services/webrtc_mesh_meeting_service.dart';
 import 'services/central_translation_service.dart';
 import 'services/google_speech_translation_service.dart';
+import 'services/chat_service.dart';
 
 // Router
 import 'router/app_router.dart';
@@ -78,6 +79,11 @@ class GlobeCastApp extends StatelessWidget {
         // Central Translation Service
         ChangeNotifierProvider(
           create: (context) => CentralTranslationService(),
+        ),
+
+        // Chat Service
+        ChangeNotifierProvider(
+          create: (context) => ChatService(),
         ),
       ],
       child: MaterialApp(

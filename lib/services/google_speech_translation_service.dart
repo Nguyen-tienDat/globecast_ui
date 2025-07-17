@@ -85,8 +85,8 @@ class GoogleSpeechTranslationService extends ChangeNotifier {
   static const int _speechBufferSize = 30; // ✅ INCREASED: Was 15
   static const int _minAudioBytes = 16000; // ✅ INCREASED: 16KB minimum
   static const double _confidenceThreshold = 0.5; // ✅ LOWERED: For virtual machines
-  static const int _maxSilenceMs = 3000; // ✅ 3 seconds silence tolerance
-  static const int _minWordsForSentence = 2; // ✅ FIXED: Lowered from 4 to 2 words
+  static const int _maxSilenceMs = 8000; // ✅ 3 seconds silence tolerance
+  static const int _minWordsForSentence = 3; // ✅ FIXED: Lowered from 4 to 2 words
   static const int _processingIntervalMs = 6000; // ✅ INCREASED: Was 3000ms
 
   // 📊 PERFORMANCE TRACKING
